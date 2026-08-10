@@ -11,9 +11,12 @@
   "scripts": {
     "start": "node server/server.js",
     "test": "node --test",
+    "typecheck": "tsc",
     "smoke:browser": "node smoke/browser-smoke.js"
   },
   "devDependencies": {
-    "playwright": "^1.62.1"
+    "@types/node": "^26.2.0",
+    "playwright": "^1.62.1",
+    "typescript": "^7.0.2"
   }
 }

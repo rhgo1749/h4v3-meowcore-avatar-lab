@@ -5,8 +5,14 @@
  *
  * Bind/port are configurable through environment variables so the same
  * image can be reused across host environments without rebuilding:
- *   AVATAR_BIND  default 127.0.0.1 (loopback-only by default)
- *   AVATAR_PORT  default 8930
+ *   AVATAR_BIND  process listen bind, default 127.0.0.1 (loopback-only)
+ *   AVATAR_PORT  port, default 8930
+ *
+ * NOTE: in the compose path (compose.yaml) the container-internal listen
+ * is intentionally fixed to 0.0.0.0 so the published port mapping can
+ * reach it. Host exposure is controlled separately by AVATAR_HOST_BIND
+ * (default 127.0.0.1; 0.0.0.0 is the explicit opt-in for external
+ * exposure). These variables apply to bare `node` runs and tests.
  *
  * Matching repository contract: .env.example documents the same names.
  */

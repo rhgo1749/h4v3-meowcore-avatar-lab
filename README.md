@@ -99,9 +99,9 @@ GET /          clean avatar output surface
 GET /debug     validation surface
 ```
 
-- Docker service: `compose.yaml` (loopback-only host bind by default)
+- Docker service: `compose.yaml` (host bind `AVATAR_HOST_BIND`, loopback-only by default)
 - Bounded lifecycle: `./scripts/avatar-runtime start|stop|restart|status|logs`
-- Config: `AVATAR_BIND` / `AVATAR_PORT` (default `127.0.0.1:8930`)
+- Config: `AVATAR_BIND` (bare process), `AVATAR_HOST_BIND` (compose host exposure), `AVATAR_PORT` (default `127.0.0.1:8930`, loopback-only)
 
 Full commands and validation instructions: `runtime/README.md`.
 

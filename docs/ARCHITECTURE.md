@@ -96,9 +96,11 @@ GET /debug     validation surface
 ```
 
 Implementation lives in `runtime/` (Node.js, zero runtime dependencies),
-served as a Docker service via `compose.yaml`. Config: `AVATAR_BIND` /
-`AVATAR_PORT` (default `127.0.0.1:8930`, invalid values fail fast). See
-`runtime/README.md` for commands and validation.
+served as a Docker service via `compose.yaml`. Config: `AVATAR_BIND`
+(bare-process listen, default `127.0.0.1`), `AVATAR_HOST_BIND` (compose host
+publish bind, default `127.0.0.1`, loopback-only; `0.0.0.0` is explicit
+opt-in external exposure) and `AVATAR_PORT` (default `8930`, invalid values
+fail fast). See `runtime/README.md` for commands and validation.
 
 ## Planned interface
 

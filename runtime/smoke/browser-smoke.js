@@ -38,29 +38,31 @@ async function main() {
 
   // Clean output surface.
   const indexRes = await page.goto(`${BASE}/`);
+  assert.ok(indexRes, 'index navigation failed');
   assert.equal(indexRes.status(), 200, 'index HTTP 200');
   await page.waitForSelector('#avatar-stage');
   await page.waitForFunction(() =>
-    document.getElementById('runtime-status').textContent.includes('runtime ok'),
+    document.getElementById('runtime-status')?.textContent?.includes('runtime ok') === true,
     { timeout: 5000 }
   );
-  const statusText = await page.textContent('#runtime-status');
+  const statusText = (await page.textContent('#runtime-status')) ?? '';
   assert.match(statusText, /runtime ok/);
   assert.match(statusText, /placeholder/);
 
   // Debug / validation surface.
   const debugRes = await page.goto(`${BASE}/debug`);
+  assert.ok(debugRes, 'debug navigation failed');
   assert.equal(debugRes.status(), 200, 'debug HTTP 200');
   await page.waitForFunction(() => {
-    const t = document.getElementById('healthz').textContent;
+    const t = document.getElementById('healthz')?.textContent ?? '';
     return t !== '(not fetched)' && !t.startsWith('(fetching');
   }, { timeout: 5000 });
-  const healthText = await page.textContent('#healthz');
-  const stateText = await page.textContent('#state');
+  const healthText = (await page.textContent('#healthz')) ?? '';
+  const stateText = (await page.textContent('#state')) ?? '';
   assert.match(healthText, /"status": "ok"/, 'debug shows ok health');
   assert.match(stateText, /placeholder-none/, 'debug shows placeholder model');
-  const checkHealth = await page.textContent('#check-health');
-  const checkState = await page.textContent('#check-state');
+  const checkHealth = (await page.textContent('#check-health')) ?? '';
+  const checkState = (await page.textContent('#check-state')) ?? '';
   assert.match(checkHealth, /GET \/healthz -> ok/);
   assert.match(checkState, /placeholder model reported/);
 

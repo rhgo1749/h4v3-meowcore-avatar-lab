@@ -85,8 +85,15 @@
         const model = state.model && state.model.loaded
           ? state.model.id
           : "placeholder (no model)";
-        el.innerHTML = '<span class="ok">runtime ok</span> · v' + state.version +
-          " · model: " + model;
+        // Build the status line with DOM nodes only: model id/version will
+        // later come from exported model metadata, so avoid string-built
+        // markup here (XSS guard: public.test.js).
+        el.textContent = "";
+        const ok = document.createElement("span");
+        ok.className = "ok";
+        ok.textContent = "runtime ok";
+        el.append(ok);
+        el.append(" · v" + state.version + " · model: " + model);
       } catch (err) {
         el.textContent = "runtime state unavailable: " + err.message;
       }
