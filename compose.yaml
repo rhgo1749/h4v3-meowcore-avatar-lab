@@ -1,0 +1,22 @@
+# Meowcore Avatar Runtime — compose service (PR-001)
+#
+# Host exposure stays loopback-only by default. AVATAR_BIND/AVATAR_PORT come
+# from the repository .env (see .env.example) and control the HOST side.
+# Inside the container the app listens on 0.0.0.0:8930 so the published
+# host port mapping works; the host-side bind is what limits exposure.
+services:
+  avatar-runtime:
+    build:
+      context: ./runtime
+    image: avatar-runtime:dev
+    container_name: avatar-runtime
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      AVATAR_BIND: "0.0.0.0"
+      AVATAR_PORT: "8930"
+      NODE_ENV: "production"
+    ports:
+      - "127.0.0.1:${AVATAR_PORT:-8930}:8930"

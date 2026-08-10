@@ -84,13 +84,29 @@ Owns GUI-only and aesthetic operations:
 
 The exported artifact becomes the runtime input. Hermes is expected to reproduce and validate the post-export pipeline, not the Cubism GUI editing session.
 
-## Planned interface
+## Implemented interface (PR-001)
 
-This is a direction, not yet a frozen production API:
+Bootstrap runtime with a deterministic placeholder (no Live2D model yet):
 
 ```text
-GET  /healthz
-GET  /api/state
+GET /healthz   machine-readable readiness JSON (status/ready/version/model)
+GET /api/state real runtime state (placeholder model, counters)
+GET /          clean avatar output surface
+GET /debug     validation surface
+```
+
+Implementation lives in `runtime/` (Node.js, zero runtime dependencies),
+served as a Docker service via `compose.yaml`. Config: `AVATAR_BIND` /
+`AVATAR_PORT` (default `127.0.0.1:8930`, invalid values fail fast). See
+`runtime/README.md` for commands and validation.
+
+## Planned interface
+
+This is a direction, not yet a frozen production API. PR-001 deliberately
+implements only the endpoints above; the following appear together with
+real model/controller semantics, never as fake stubs:
+
+```text
 POST /api/reload
 POST /api/expression
 POST /api/motion
@@ -115,7 +131,7 @@ The service is stateful. Unlike a request/response text provider, avatar state p
 
 ## Lifecycle principle
 
-Prefer a project-owned bounded lifecycle entry point, for example:
+Prefer a project-owned bounded lifecycle entry point. PR-001 provides:
 
 ```text
 ./scripts/avatar-runtime status
@@ -125,7 +141,11 @@ Prefer a project-owned bounded lifecycle entry point, for example:
 ./scripts/avatar-runtime logs
 ```
 
-The implementation may evolve, but callers should not require unrestricted Docker daemon access.
+The script drives only the repository-owned compose service
+(`compose.yaml`); it never touches unrelated containers, the Docker daemon
+configuration, or host state. `status` also verifies the configured port
+directly when Docker is not available. Callers should not require
+unrestricted Docker daemon access.
 
 ## Validation layers
 

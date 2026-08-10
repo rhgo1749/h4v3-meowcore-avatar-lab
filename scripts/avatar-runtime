@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+#
+# avatar-runtime — project-owned bounded lifecycle entry point (PR-001)
+#
+# Usage:
+#   ./scripts/avatar-runtime start     build image and start service
+#   ./scripts/avatar-runtime stop      stop and remove service
+#   ./scripts/avatar-runtime restart   restart service
+#   ./scripts/avatar-runtime status    container state + /healthz check
+#   ./scripts/avatar-runtime logs      follow service logs
+#
+# The script only drives the repository-owned compose service. It never
+# touches unrelated containers, the Docker daemon config, or host state.
+# Without Docker available, `status` still verifies a locally-running
+# instance on the configured port.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_FILE="$ROOT/compose.yaml"
+
+port() {
+  if [ -n "${AVATAR_PORT:-}" ]; then
+    printf '%s' "$AVATAR_PORT"
+  elif [ -f "$ROOT/.env" ] && grep -q '^AVATAR_PORT=' "$ROOT/.env"; then
+    grep '^AVATAR_PORT=' "$ROOT/.env" | tail -1 | cut -d= -f2
+  else
+    printf '8930'
+  fi
+}
+
+have_docker() {
+  command -v docker >/dev/null 2>&1
+}
+
+usage() {
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  exit 1
+}
+
+case "${1:-}" in
+  start)
+    if ! have_docker; then
+      echo "error: docker CLI not available on this host." >&2
+      echo "Local development without Docker:" >&2
+      echo "  cd runtime && npm start   # binds \$(AVATAR_PORT:-8930)" >&2
+      exit 1
+    fi
+    docker compose -f "$COMPOSE_FILE" up -d --build
+    ;;
+  stop)
+    if ! have_docker; then
+      echo "error: docker CLI not available on this host." >&2
+      exit 1
+    fi
+    docker compose -f "$COMPOSE_FILE" down
+    ;;
+  restart)
+    if ! have_docker; then
+      echo "error: docker CLI not available on this host." >&2
+      exit 1
+    fi
+    docker compose -f "$COMPOSE_FILE" restart
+    ;;
+  status)
+    PORT="$(port)"
+    if have_docker; then
+      docker compose -f "$COMPOSE_FILE" ps
+    else
+      echo "docker CLI not available; checking local port ${PORT} only." >&2
+    fi
+    if curl -fsS "http://127.0.0.1:${PORT}/healthz" 2>/dev/null; then
+      echo
+      echo "healthz: OK on 127.0.0.1:${PORT}"
+    else
+      echo "healthz: UNREACHABLE on 127.0.0.1:${PORT}" >&2
+      exit 1
+    fi
+    ;;
+  logs)
+    if ! have_docker; then
+      echo "error: docker CLI not available on this host." >&2
+      exit 1
+    fi
+    docker compose -f "$COMPOSE_FILE" logs -f
+    ;;
+  *)
+    usage
+    ;;
+esac
