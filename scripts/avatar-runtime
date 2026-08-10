@@ -7,7 +7,8 @@
 #   ./scripts/avatar-runtime stop      stop and remove service
 #   ./scripts/avatar-runtime restart   restart service
 #   ./scripts/avatar-runtime status    container state + /healthz check
-#   ./scripts/avatar-runtime logs      follow service logs
+#   ./scripts/avatar-runtime logs      show recent logs (non-blocking tail)
+#   ./scripts/avatar-runtime logs -f   follow logs (interactive only)
 #
 # The script only drives the repository-owned compose service. It never
 # touches unrelated containers, the Docker daemon config, or host state.
@@ -82,7 +83,13 @@ case "${1:-}" in
       echo "error: docker CLI not available on this host." >&2
       exit 1
     fi
-    docker compose -f "$COMPOSE_FILE" logs -f
+    # Non-blocking by default so the acceptance procedure can run to
+    # completion; -f opts into interactive follow.
+    if [ "${2:-}" = "-f" ]; then
+      docker compose -f "$COMPOSE_FILE" logs -f
+    else
+      docker compose -f "$COMPOSE_FILE" logs --tail=200
+    fi
     ;;
   *)
     usage

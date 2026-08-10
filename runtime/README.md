@@ -118,7 +118,8 @@ Docker service (host with Docker):
 ```bash
 ./scripts/avatar-runtime start      # docker compose up -d --build
 ./scripts/avatar-runtime status     # compose ps + /healthz check
-./scripts/avatar-runtime logs
+./scripts/avatar-runtime logs       # recent logs (non-blocking tail)
+./scripts/avatar-runtime logs -f    # follow logs (interactive only)
 ./scripts/avatar-runtime stop
 ./scripts/avatar-runtime restart
 ```
@@ -142,13 +143,19 @@ See `docs/SECURITY.md` for the full policy.
 
 Docker image build + real host lifecycle (port bind, restart recovery,
 Hermes-side reachability, coexistence with other H4V3 services) is
-`HOST_VALIDATION_REQUIRED` for the automation boundary. Run this single
-procedure on the Ubuntu host from a terminal inside this repository checkout:
+`HOST_VALIDATION_REQUIRED` for the automation boundary. Run the **success
+block** below on the Ubuntu host from a terminal inside this repository
+checkout. It is non-interactive — every command terminates on its own (no
+`logs -f`), the recovery check ends with the runtime left **healthy and
+running**, and the final step prints the explicit PASS marker.
 
 ```bash
-# 1) PR branch를 정확히 fetch/checkout (merge 전이므로 origin/main이 아님)
+# ---- success block: 끝까지 non-interactive로 실행된다 ----
+
+# 1) PR branch를 정확히 fetch/checkout하고 head SHA 확인
 git fetch origin
 git checkout feat/avatar-runtime-bootstrap   # PR-001 work branch (PR #3 head)
+git rev-parse HEAD                           # PR #3의 검토 대상 head SHA와 일치해야 함
 git status                                   # clean + branch 확인
 
 # 2) 이미지 build + 서비스 start
@@ -165,25 +172,45 @@ docker exec hermes-cloudcli-agent wget -qO- http://127.0.0.1:8930/healthz
 #   (Hermes 컨테이너가 host network를 공유하지 않으면, Hermes가 호스트
 #    서비스를 소비하는 기존 bounded 경로로 동일하게 확인)
 
-# 6) 승인된 브라우저 경로로 / 와 /debug 열기
-#    http://127.0.0.1:8930/        -> "No Live2D model loaded" placeholder + runtime ok
-#    http://127.0.0.1:8930/debug   -> health/state checks 모두 ok
+# 6) / 와 /debug browser acceptance — headless host에서 재현 가능한 경로:
+#    repo가 제공하는 Playwright headless chromium smoke를 host에서 실행해
+#    컨테이너가 서빙하는 두 페이지를 실제 브라우저로 검증한다
+#    (GUI 브라우저/SSH tunnel 불필요; 원격 브라우저의 loopback 주소는
+#    host가 아닌 클라이언트 자신을 가리키므로 사용하지 않는다).
+cd runtime
+npm install                                  # lockfile 고정 (smoke devDeps 포함)
+npx playwright install chromium              # 최초 1회만
+npm run smoke:browser                        # expect: BROWSER SMOKE PASS
+cd ..
 
-# 7) stop -> start 복구
+# 7) stop -> start 복구 후 healthy 상태로 유지
 ./scripts/avatar-runtime stop
 ./scripts/avatar-runtime start
 ./scripts/avatar-runtime status              # 동일한 health 회복 확인
 
-# 8) 진단 / 롤백
-./scripts/avatar-runtime logs                # 필요시 로그 확인
-./scripts/avatar-runtime stop                # 롤백 = compose down (host 변경 없음)
+# 8) PASS marker — 여기까지 도달하면 acceptance 성공 (runtime은 동작 중)
+echo '✅ PR #3 HOST ACCEPTANCE PASS'
+```
+
+어느 단계라도 실패하면 중단하고 아래 failure block으로 진단/롤백한다:
+
+```bash
+# ---- failure block: diagnostics + rollback ----
+
+# 1) 상태/로그 진단 (logs는 non-blocking tail이라 block되지 않음)
+./scripts/avatar-runtime status
+./scripts/avatar-runtime logs                # 최근 200줄
+
+# 2) 롤백 = compose down (host 변경 없음, 다른 서비스 재시작 없음)
+./scripts/avatar-runtime stop
 ```
 
 PASS conditions — 모두 충족해야 한다:
 
 - container 기동 + `GET /healthz`가 `{"status":"ok","ready":true,...}` 반환
 - host curl과 Hermes-side reachability 모두 OK
-- `/`·`/debug`를 승인된 브라우저 경로에서 열 수 있음 (placeholder 명시)
+- host-side Playwright smoke가 `BROWSER SMOKE PASS`로 `/`·`/debug` 검증
 - `stop` → `start` 후 동일 health 복구
 - 기존 H4V3 서비스/포트 8930 충돌 없음, 다른 서비스 재시작 없음
-- 롤백: `./scripts/avatar-runtime stop`만으로 원복
+- runtime이 healthy 상태로 남아 있고 PASS marker가 출력됨
+- 롤백: failure block의 `./scripts/avatar-runtime stop`만으로 원복
