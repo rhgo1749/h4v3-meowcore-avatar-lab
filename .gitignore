@@ -1,0 +1,33 @@
+# Local configuration / secrets
+.env
+.env.*
+!.env.example
+
+# Node / web
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+
+# Python/tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Logs / runtime scratch
+*.log
+logs/
+tmp/
+.cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Explicitly local/private asset staging
+models/private/
+assets/private/
