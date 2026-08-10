@@ -96,10 +96,10 @@ Local development (no Docker needed):
 
 ```bash
 cd runtime
-npm install
-npm test                 # node:test unit/contract tests
-npm run typecheck        # tsc --checkJs over server/test/smoke (typescript + @types/node devDeps)
-npm start                # server on 127.0.0.1:8930 (AVATAR_BIND/AVATAR_PORT override)
+npm ci                     # lockfile 강제 설치 (package-lock.json 커밋됨)
+npm test                   # node:test unit/contract tests
+npm run typecheck          # tsc --checkJs over server/test/smoke (typescript + @types/node devDeps)
+npm start                  # server on 127.0.0.1:8930 (AVATAR_BIND/AVATAR_PORT override)
 curl http://127.0.0.1:8930/healthz
 ```
 
@@ -149,50 +149,66 @@ checkout. It is non-interactive — every command terminates on its own (no
 `logs -f`), the recovery check ends with the runtime left **healthy and
 running**, and the final step prints the explicit PASS marker.
 
+The success block is **fail-closed by construction**: the entire block runs
+inside one subshell with `set -euo pipefail` scoped to it, so any required
+gate that fails aborts the subshell immediately and the PASS marker is never
+printed. The block first fetches `pull/3/head` and asserts — with a real
+`test` — that the checked-out commit is exactly PR #3's head. The outer
+interactive shell is not affected (no shell options are left behind). If the
+checkout has uncommitted tracked changes the detach step fails on purpose;
+commit/stash them first, or the block will stop without a PASS marker.
+
 ```bash
-# ---- success block: 끝까지 non-interactive로 실행된다 ----
+# ---- success block: subshell 안에서만 set -euo pipefail 적용 ----
+# 어느 필수 gate라도 실패하면 subshell이 즉시 중단되고 PASS marker는
+# 절대 출력되지 않는다. 상위 interactive shell에는 shell option이 남지 않는다.
+(
+  set -euo pipefail
 
-# 1) PR branch를 정확히 fetch/checkout하고 head SHA 확인
-git fetch origin
-git checkout feat/avatar-runtime-bootstrap   # PR-001 work branch (PR #3 head)
-git rev-parse HEAD                           # PR #3의 검토 대상 head SHA와 일치해야 함
-git status                                   # clean + branch 확인
+  # 1) PR #3 head를 fetch하고 검증 대상 commit이 실제 head임을 assert
+  git fetch origin pull/3/head
+  EXPECTED_HEAD="$(git rev-parse FETCH_HEAD)"
+  if [ "$(git rev-parse HEAD)" != "$EXPECTED_HEAD" ]; then
+    git checkout --detach "$EXPECTED_HEAD"   # dirty tree면 실패 -> 전체 중단
+  fi
+  test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
 
-# 2) 이미지 build + 서비스 start
-./scripts/avatar-runtime start
+  # 2) 이미지 build + 서비스 start
+  ./scripts/avatar-runtime start
 
-# 3) 컨테이너 상태 + host /healthz
-./scripts/avatar-runtime status              # compose ps + "healthz: OK" 출력
+  # 3) 컨테이너 상태 + host /healthz
+  ./scripts/avatar-runtime status            # compose ps + "healthz: OK" 출력
 
-# 4) host에서 직접 확인
-curl -fsS http://127.0.0.1:8930/healthz      # {"status":"ok","ready":true,...}
+  # 4) host에서 직접 확인
+  curl -fsS http://127.0.0.1:8930/healthz    # {"status":"ok","ready":true,...}
 
-# 5) Hermes 환경에서 bounded network path로 /healthz 도달 확인
-docker exec hermes-cloudcli-agent wget -qO- http://127.0.0.1:8930/healthz
-#   (Hermes 컨테이너가 host network를 공유하지 않으면, Hermes가 호스트
-#    서비스를 소비하는 기존 bounded 경로로 동일하게 확인)
+  # 5) Hermes 환경에서 bounded network path로 /healthz 도달 확인
+  docker exec hermes-cloudcli-agent wget -qO- http://127.0.0.1:8930/healthz
+  #   (Hermes 컨테이너가 host network를 공유하지 않으면, Hermes가 호스트
+  #    서비스를 소비하는 기존 bounded 경로로 동일하게 확인)
 
-# 6) / 와 /debug browser acceptance — headless host에서 재현 가능한 경로:
-#    repo가 제공하는 Playwright headless chromium smoke를 host에서 실행해
-#    컨테이너가 서빙하는 두 페이지를 실제 브라우저로 검증한다
-#    (GUI 브라우저/SSH tunnel 불필요; 원격 브라우저의 loopback 주소는
-#    host가 아닌 클라이언트 자신을 가리키므로 사용하지 않는다).
-cd runtime
-npm install                                  # lockfile 고정 (smoke devDeps 포함)
-npx playwright install chromium              # 최초 1회만
-npm run smoke:browser                        # expect: BROWSER SMOKE PASS
-cd ..
+  # 6) / 와 /debug browser acceptance — headless host에서 재현 가능한 경로:
+  #    repo가 제공하는 Playwright headless chromium smoke를 host에서 실행해
+  #    컨테이너가 서빙하는 두 페이지를 실제 브라우저로 검증한다
+  #    (GUI 브라우저/SSH tunnel 불필요; 원격 브라우저의 loopback 주소는
+  #    host가 아닌 클라이언트 자신을 가리키므로 사용하지 않는다).
+  cd runtime
+  npm ci                                     # lockfile 강제 (smoke devDeps 포함)
+  npx playwright install chromium            # 최초 1회만
+  npm run smoke:browser                      # expect: BROWSER SMOKE PASS
+  cd ..
 
-# 7) stop -> start 복구 후 healthy 상태로 유지
-./scripts/avatar-runtime stop
-./scripts/avatar-runtime start
-./scripts/avatar-runtime status              # 동일한 health 회복 확인
+  # 7) stop -> start 복구 후 healthy 상태로 유지
+  ./scripts/avatar-runtime stop
+  ./scripts/avatar-runtime start
+  ./scripts/avatar-runtime status            # 동일한 health 회복 확인
 
-# 8) PASS marker — 여기까지 도달하면 acceptance 성공 (runtime은 동작 중)
-echo '✅ PR #3 HOST ACCEPTANCE PASS'
+  # 8) PASS marker — 여기까지 도달해야만 acceptance 성공 (runtime은 동작 중)
+  echo '✅ PR #3 HOST ACCEPTANCE PASS'
+)
 ```
 
-어느 단계라도 실패하면 중단하고 아래 failure block으로 진단/롤백한다:
+subshell이 중단되면(실패 gate 존재) 아래 failure block으로 진단/롤백한다:
 
 ```bash
 # ---- failure block: diagnostics + rollback ----
