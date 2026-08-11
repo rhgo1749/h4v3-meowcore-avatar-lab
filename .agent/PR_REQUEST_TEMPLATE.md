@@ -99,6 +99,17 @@ Ubuntu Host
 
 Cubism Editor는 human GUI authoring surface다. Hermes는 export 이후 pipeline과 runtime을 재현/검증한다.
 
+Host validation이 필요한 요청은 다음 checkout 경계를 반드시 유지한다.
+
+- Hermes development checkout/worktree: 코드 작업, repository validation, PR push
+- Ubuntu host ephemeral validation checkout: exact `pull/<PR>/head`를 detached
+  `HEAD`로 검증하는 임시 clone
+- Ubuntu host persistent deployment checkout: human merge 이후 clean `main`을
+  fast-forward하고 rebuild/restart하는 운영 clone
+
+미병합 PR을 persistent deployment checkout에서 검사하거나, Hermes container에
+Docker socket/root/broad host 권한을 추가해 host 검증을 대체하지 않는다.
+
 ## 7. Implementation requirements
 
 - latest `origin/main`을 기준으로 작업한다.
@@ -141,6 +152,17 @@ Automation states:
 
 `HOST_VALIDATION_REQUIRED`이면 운영자가 그대로 실행 가능한 최소 host acceptance procedure, expected PASS conditions, failure diagnostics와 recovery를 PR/final report에 남긴다.
 
+그 procedure는 다음을 명시해야 한다.
+
+- `pull/<PR>/head` fetch와 checked-out SHA의 exact identity assertion
+- ephemeral clone 생성/정리와 persistent deployment checkout 미사용
+- Docker build/start/status, host health/API, 필요한 bounded Hermes reachability,
+  browser smoke, stop→start recovery의 PASS 조건
+- `set -euo pipefail` 또는 동등한 fail-closed semantics와 마지막 성공 marker
+- command-not-found/required-gate 실패 시 PASS를 출력하지 않는 diagnostics/rollback
+- human merge 이후에만 실행하는 persistent `main` clean/fast-forward/rebuild/
+  restart 절차를 acceptance block과 분리
+
 ## 9. Luna lead / delegation contract
 
 Luna lead는 Source Issue, `AGENTS.md`, canonical route를 먼저 읽고 current main/source를 조사한다. 작은 작업은 직접 수행하고 bounded research/implementation/test를 worker에게 위임할 수 있다. delegated output은 diff, source-of-truth, validation을 다시 검토한다. PR은 만들거나 갱신할 수 있으나 merge하지 않는다.
@@ -167,6 +189,8 @@ Luna lead는 Source Issue, `AGENTS.md`, canonical route를 먼저 읽고 current
 - [ ] repository/host/human validation claims 분리
 - [ ] 필요한 자동 검증 결과 기록
 - [ ] 필요한 host/manual gate verified 또는 explicit stop state
+- [ ] host acceptance가 필요하면 exact PR head ephemeral clone과 fail-closed handoff 기록
+- [ ] post-merge persistent deployment는 `main` clean/fast-forward 절차로 분리
 - [ ] work branch pushed and exactly one Korean PR opened/updated
 - [ ] PR not merged without authorization
 

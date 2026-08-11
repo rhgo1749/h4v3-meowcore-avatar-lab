@@ -139,94 +139,228 @@ configured port directly (useful when running `npm start` locally).
 
 See `docs/SECURITY.md` for the full policy.
 
-## Host acceptance (operator)
+## Host acceptance (operator; pre-merge)
 
 Docker image build + real host lifecycle (port bind, restart recovery,
-Hermes-side reachability, coexistence with other H4V3 services) is
-`HOST_VALIDATION_REQUIRED` for the automation boundary. Run the **success
-block** below on the Ubuntu host from a terminal inside this repository
-checkout. It is non-interactive — every command terminates on its own (no
-`logs -f`), the recovery check ends with the runtime left **healthy and
-running**, and the final step prints the explicit PASS marker.
+bounded Hermes-side reachability, and coexistence with other H4V3 services)
+is `HOST_VALIDATION_REQUIRED` for the automation boundary. The acceptance
+target is an **ephemeral Ubuntu-host clone of the PR**, never the persistent
+deployment checkout and never the Hermes development checkout.
 
-The success block is **fail-closed by construction**: the entire block runs
-inside one subshell with `set -euo pipefail` scoped to it, so any required
-gate that fails aborts the subshell immediately and the PASS marker is never
-printed. The block first fetches `pull/3/head` and asserts — with a real
-`test` — that the checked-out commit is exactly PR #3's head. The outer
-interactive shell is not affected (no shell options are left behind). If the
-checkout has uncommitted tracked changes the detach step fails on purpose;
-commit/stash them first, or the block will stop without a PASS marker.
+Set these operator-owned inputs before running the success block. Do not put
+credentials in `REPO_URL` or `HERMES_HEALTH_URL`, and do not enable shell
+tracing while running the block:
+
+- `REPO_URL`: the repository's exact `origin` URL
+- `PR_NUMBER`: the numeric GitHub pull request to validate
+- `HERMES_CONTAINER`: the approved Hermes container name on the host
+- `HERMES_HEALTH_URL`: the bounded URL that the Hermes container can use to
+  reach this runtime (for a host-networked Hermes container this may be
+  set with `HERMES_HEALTH_URL="http://127.0.0.1:${AVATAR_PORT:-8930}/healthz"`;
+  use the configured route otherwise)
+- optional `AVATAR_PORT`: the port used by the candidate, default `8930`
+
+The block is copy-pasteable after those inputs are exported. It creates a
+run-owned temporary clone, fetches `pull/<PR>/head`, asserts the exact SHA,
+and only then builds or starts the service. The whole success path is a
+non-interactive fail-closed subshell; a required command or gate failure
+exits before the PASS marker. The temporary clone path is printed on both
+success and failure: it must remain until the running acceptance service is
+stopped through the same project-owned script, after which the operator may
+remove that run-owned directory.
 
 ```bash
-# ---- success block: subshell 안에서만 set -euo pipefail 적용 ----
-# 어느 필수 gate라도 실패하면 subshell이 즉시 중단되고 PASS marker는
-# 절대 출력되지 않는다. 상위 interactive shell에는 shell option이 남지 않는다.
 (
   set -euo pipefail
 
-  # 1) PR #3 head를 fetch하고 검증 대상 commit이 실제 head임을 assert
-  git fetch origin pull/3/head
-  EXPECTED_HEAD="$(git rev-parse FETCH_HEAD)"
-  if [ "$(git rev-parse HEAD)" != "$EXPECTED_HEAD" ]; then
-    git checkout --detach "$EXPECTED_HEAD"   # dirty tree면 실패 -> 전체 중단
-  fi
-  test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+  : "${REPO_URL:?export REPO_URL with the repository origin URL}"
+  : "${PR_NUMBER:?export PR_NUMBER with the numeric pull request number}"
+  : "${HERMES_CONTAINER:?export HERMES_CONTAINER with the approved Hermes container name}"
+  : "${HERMES_HEALTH_URL:?export HERMES_HEALTH_URL with the bounded Hermes route}"
 
-  # 2) 이미지 build + 서비스 start
+  case "$PR_NUMBER" in
+    ''|*[!0-9]*)
+      printf 'PR_NUMBER must contain only decimal digits\n' >&2
+      exit 2
+      ;;
+  esac
+
+  for required in git docker curl node npm; do
+    command -v "$required" >/dev/null 2>&1 || {
+      printf 'required command is unavailable: %s\n' "$required" >&2
+      exit 127
+    }
+  done
+  docker compose version >/dev/null
+
+  PORT="${AVATAR_PORT:-8930}"
+  BASE="http://127.0.0.1:${PORT}"
+  VALIDATION_DIR="$(mktemp -d "${TMPDIR:-/tmp}/meowcore-avatar-pr.XXXXXX")"
+
+  cleanup() {
+    local rc=$?
+    if [ "$rc" -eq 0 ]; then
+      printf 'acceptance passed; retain clone until explicit service stop: %s\n' "$VALIDATION_DIR"
+    else
+      printf 'validation clone retained for diagnostics: %s\n' "$VALIDATION_DIR" >&2
+    fi
+  }
+  trap cleanup EXIT
+
+  git clone --no-checkout "$REPO_URL" "$VALIDATION_DIR"
+  git -C "$VALIDATION_DIR" fetch --force origin "pull/${PR_NUMBER}/head"
+  EXPECTED_HEAD="$(git -C "$VALIDATION_DIR" rev-parse FETCH_HEAD)"
+  git -C "$VALIDATION_DIR" checkout --detach "$EXPECTED_HEAD"
+  test "$(git -C "$VALIDATION_DIR" rev-parse HEAD)" = "$EXPECTED_HEAD"
+  test -z "$(git -C "$VALIDATION_DIR" status --porcelain=v1)"
+  cd "$VALIDATION_DIR"
+
+  docker compose -f compose.yaml config >/dev/null
   ./scripts/avatar-runtime start
+  ./scripts/avatar-runtime status
 
-  # 3) 컨테이너 상태 + host /healthz
-  ./scripts/avatar-runtime status            # compose ps + "healthz: OK" 출력
+  assert_ready() {
+    node -e '
+      const fs = require("node:fs");
+      let value;
+      try {
+        value = JSON.parse(fs.readFileSync(0, "utf8"));
+      } catch (error) {
+        console.error("invalid JSON response");
+        process.exit(1);
+      }
+      if (value.status !== "ok" || value.ready !== true) {
+        console.error("runtime is not ready");
+        process.exit(1);
+      }
+    '
+  }
 
-  # 4) host에서 직접 확인
-  curl -fsS http://127.0.0.1:8930/healthz    # {"status":"ok","ready":true,...}
+  HEALTH="$(curl -fsS "$BASE/healthz")"
+  printf '%s' "$HEALTH" | assert_ready
+  STATE="$(curl -fsS "$BASE/api/state")"
+  printf '%s' "$STATE" | node -e '
+    const fs = require("node:fs");
+    const value = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (value.model?.kind !== "placeholder") process.exit(1);
+  '
 
-  # 5) Hermes 환경에서 bounded network path로 /healthz 도달 확인
-  docker exec hermes-cloudcli-agent wget -qO- http://127.0.0.1:8930/healthz
-  #   (Hermes 컨테이너가 host network를 공유하지 않으면, Hermes가 호스트
-  #    서비스를 소비하는 기존 bounded 경로로 동일하게 확인)
+  if docker exec "$HERMES_CONTAINER" sh -c 'command -v wget >/dev/null 2>&1'; then
+    HERMES_HEALTH="$(docker exec "$HERMES_CONTAINER" wget -qO- "$HERMES_HEALTH_URL")"
+  elif docker exec "$HERMES_CONTAINER" sh -c 'command -v curl >/dev/null 2>&1'; then
+    HERMES_HEALTH="$(docker exec "$HERMES_CONTAINER" curl -fsS "$HERMES_HEALTH_URL")"
+  else
+    printf 'Hermes container has neither wget nor curl for bounded reachability\n' >&2
+    exit 127
+  fi
+  printf '%s' "$HERMES_HEALTH" | assert_ready
 
-  # 6) / 와 /debug browser acceptance — headless host에서 재현 가능한 경로:
-  #    repo가 제공하는 Playwright headless chromium smoke를 host에서 실행해
-  #    컨테이너가 서빙하는 두 페이지를 실제 브라우저로 검증한다
-  #    (GUI 브라우저/SSH tunnel 불필요; 원격 브라우저의 loopback 주소는
-  #    host가 아닌 클라이언트 자신을 가리키므로 사용하지 않는다).
-  cd runtime
-  npm ci                                     # lockfile 강제 (smoke devDeps 포함)
-  npx playwright install chromium            # 최초 1회만
-  npm run smoke:browser                      # expect: BROWSER SMOKE PASS
-  cd ..
+  (
+    cd runtime
+    npm ci
+    npx playwright install chromium
+    AVATAR_SMOKE_BASE="$BASE" npm run smoke:browser
+  )
 
-  # 7) stop -> start 복구 후 healthy 상태로 유지
   ./scripts/avatar-runtime stop
   ./scripts/avatar-runtime start
-  ./scripts/avatar-runtime status            # 동일한 health 회복 확인
+  ./scripts/avatar-runtime status
+  HEALTH="$(curl -fsS "$BASE/healthz")"
+  printf '%s' "$HEALTH" | assert_ready
 
-  # 8) PASS marker — 여기까지 도달해야만 acceptance 성공 (runtime은 동작 중)
-  echo '✅ PR #3 HOST ACCEPTANCE PASS'
+  printf '✅ PR #%s HOST ACCEPTANCE PASS @ %s\n' "$PR_NUMBER" "$EXPECTED_HEAD"
 )
 ```
 
-subshell이 중단되면(실패 gate 존재) 아래 failure block으로 진단/롤백한다:
+If the success block stops before its marker, do not report host acceptance
+as PASS. Use the retained path printed by the trap for bounded diagnostics:
 
 ```bash
-# ---- failure block: diagnostics + rollback ----
-
-# 1) 상태/로그 진단 (logs는 non-blocking tail이라 block되지 않음)
-./scripts/avatar-runtime status
-./scripts/avatar-runtime logs                # 최근 200줄
-
-# 2) 롤백 = compose down (host 변경 없음, 다른 서비스 재시작 없음)
-./scripts/avatar-runtime stop
+# Set this to the exact path printed by the failed success block.
+VALIDATION_DIR='/tmp/meowcore-avatar-pr.<run-id>'
+(
+  cd "$VALIDATION_DIR"
+  ./scripts/avatar-runtime status || printf 'status diagnostics failed\n' >&2
+  ./scripts/avatar-runtime logs || printf 'log diagnostics failed\n' >&2
+  if ./scripts/avatar-runtime stop; then
+    printf 'project runtime stopped; no unrelated service was targeted\n'
+  else
+    printf 'project runtime stop failed; retain the clone for operator recovery\n' >&2
+    exit 1
+  fi
+)
+rm -rf -- "$VALIDATION_DIR"
 ```
 
-PASS conditions — 모두 충족해야 한다:
+The cleanup command is limited to the exact `mktemp` directory created by
+this run. It is not a general host cleanup command. If the stop step fails,
+retain the directory and escalate rather than deleting it. The success block
+must satisfy all of these conditions before its marker is trusted:
 
-- container 기동 + `GET /healthz`가 `{"status":"ok","ready":true,...}` 반환
-- host curl과 Hermes-side reachability 모두 OK
-- host-side Playwright smoke가 `BROWSER SMOKE PASS`로 `/`·`/debug` 검증
-- `stop` → `start` 후 동일 health 복구
-- 기존 H4V3 서비스/포트 8930 충돌 없음, 다른 서비스 재시작 없음
-- runtime이 healthy 상태로 남아 있고 PASS marker가 출력됨
-- 롤백: failure block의 `./scripts/avatar-runtime stop`만으로 원복
+- the checked-out `HEAD` equals the fetched `pull/<PR>/head` SHA;
+- Docker compose config/build/start and the project-owned service status pass;
+- host `/healthz` is ready and `/api/state` reports the current model contract;
+- the Hermes container reaches the service through the configured bounded URL;
+- host-side Playwright smoke prints `BROWSER SMOKE PASS` for `/` and `/debug`;
+- `stop` → `start` restores health and leaves the candidate running; and
+- no unrelated service is restarted and no failure path reaches the PASS marker.
+
+This is host acceptance evidence for the ephemeral PR clone only. It does not
+prove that the PR is merged or that the persistent deployment is current.
+
+## Post-merge persistent deployment (operator)
+
+Run this procedure only after human review and GitHub evidence confirms that
+the PR is merged into `main`. First stop and remove any acceptance service
+from the ephemeral clone. Set `REPO_URL` to the exact remote URL and
+`DEPLOYMENT_DIR` to the operator-managed persistent checkout; do not reuse the
+ephemeral path.
+
+The success block refuses dirty or non-`main` deployment checkouts. It fetches
+`origin/main`, fast-forwards only, verifies `HEAD == origin/main`, then
+rebuilds and restarts the repository-owned service:
+
+```bash
+(
+  set -euo pipefail
+
+  : "${REPO_URL:?export REPO_URL with the repository origin URL}"
+  : "${DEPLOYMENT_DIR:?export DEPLOYMENT_DIR with the persistent checkout path}"
+  for required in git docker curl; do
+    command -v "$required" >/dev/null 2>&1 || {
+      printf 'required command is unavailable: %s\n' "$required" >&2
+      exit 127
+    }
+  done
+  docker compose version >/dev/null
+
+  test -d "$DEPLOYMENT_DIR/.git"
+  test "$(git -C "$DEPLOYMENT_DIR" remote get-url origin)" = "$REPO_URL"
+  test "$(git -C "$DEPLOYMENT_DIR" branch --show-current)" = "main"
+  test -z "$(git -C "$DEPLOYMENT_DIR" status --porcelain=v1)"
+
+  git -C "$DEPLOYMENT_DIR" fetch origin main
+  git -C "$DEPLOYMENT_DIR" merge --ff-only origin/main
+  test "$(git -C "$DEPLOYMENT_DIR" rev-parse HEAD)" = \
+    "$(git -C "$DEPLOYMENT_DIR" rev-parse origin/main)"
+  test -z "$(git -C "$DEPLOYMENT_DIR" status --porcelain=v1)"
+  docker compose -f "$DEPLOYMENT_DIR/compose.yaml" config >/dev/null
+
+  (
+    cd "$DEPLOYMENT_DIR"
+    ./scripts/avatar-runtime stop
+    ./scripts/avatar-runtime start
+    ./scripts/avatar-runtime status
+  )
+  curl -fsS "http://127.0.0.1:${AVATAR_PORT:-8930}/healthz" >/dev/null
+  printf '✅ POST-MERGE DEPLOYMENT VERIFIED @ %s\n' \
+    "$(git -C "$DEPLOYMENT_DIR" rev-parse HEAD)"
+)
+```
+
+If deployment fails, do not print or infer a deployment PASS. Run
+`./scripts/avatar-runtime status` and `./scripts/avatar-runtime logs` from
+the persistent checkout, then stop only this project service if necessary.
+The source rollback decision belongs to the human operator and must select a
+known-good **merged `main` commit**; this contract does not authorize a
+destructive reset, a PR ref, or a development checkout as a rollback target.

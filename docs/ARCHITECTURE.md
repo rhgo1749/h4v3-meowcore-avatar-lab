@@ -28,6 +28,30 @@ engineering client     broadcast client
 
 The runtime follows the same general separation as host-served local model infrastructure: the Ubuntu host provides a capability as a service; Hermes consumes and manages it through a bounded interface rather than embedding the whole runtime inside the Hermes container.
 
+## Checkout ownership
+
+The runtime topology has three different checkout roles:
+
+```text
+Hermes container
+└─ development checkout/worktree
+   └─ source changes, repository validation, PR push
+
+Ubuntu host
+├─ ephemeral validation checkout
+│  └─ exact GitHub pull/<PR>/head acceptance before merge
+│
+└─ persistent deployment checkout
+   └─ clean merged main only; rebuild/restart after human merge
+```
+
+The ephemeral checkout is disposable and must fetch/assert the exact PR head
+before it builds or starts the runtime. The persistent deployment checkout is
+not a PR review workspace: it is advanced only after the PR is merged, with a
+clean `main` fast-forward to `origin/main`. A host acceptance result from the
+ephemeral checkout does not imply that the persistent service has been
+deployed.
+
 ## Responsibilities
 
 ### Ubuntu host / Avatar Runtime
@@ -148,6 +172,22 @@ The script drives only the repository-owned compose service
 configuration, or host state. `status` also verifies the configured port
 directly when Docker is not available. Callers should not require
 unrestricted Docker daemon access.
+
+## Host acceptance and persistent deployment flow
+
+Before merge, an operator runs the host acceptance procedure from the
+ephemeral exact-PR checkout. The procedure is fail-closed: required command
+presence, exact SHA identity, Docker lifecycle, health/API responses, bounded
+client reachability, browser smoke, and recovery must all succeed before its
+explicit PASS marker is printed. Failure diagnostics and a project-scoped
+service stop/rollback path are separate from the success block.
+
+After human merge, the operator separately verifies that the persistent
+checkout is the expected repository, on clean `main`, and fast-forwarded to
+the fetched `origin/main` before rebuilding/restarting the service. No PR
+branch, detached PR ref, or development checkout is used for that deployment
+step. See `runtime/README.md` for the operator procedures and their distinct
+validation claims.
 
 ## Validation layers
 

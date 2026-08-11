@@ -16,6 +16,21 @@ Do not add unrestricted `/var/run/docker.sock`, root, broad sudo, or arbitrary h
 
 If lifecycle automation is required, expose only project-scoped commands or management endpoints needed for this service.
 
+## Checkout and deployment boundary
+
+Hermes' development checkout/worktree is not an Ubuntu host deployment
+checkout. Host acceptance of an unmerged PR is an operator action performed
+from a disposable clone that fetches the exact `pull/<PR>/head` and asserts
+the checked-out SHA. This does not require granting Hermes Docker socket,
+root, broad sudo, or arbitrary host filesystem access.
+
+The persistent deployment checkout is reserved for a human-merged `main`.
+Before rebuild/restart it must be clean, on the `main` branch, and
+fast-forwarded to the fetched `origin/main`. It must never be used to switch
+to or validate a PR branch/worktree. The ephemeral validation checkout and
+persistent deployment checkout therefore have separate lifecycle, rollback,
+and evidence records.
+
 ## Network exposure
 
 Default to the narrowest useful bind. A development runtime may begin loopback-only and later gain an explicit Tailscale/approved reverse-proxy route.
@@ -66,3 +81,10 @@ Repository checks prove repository behavior only. They do not prove:
 - H4V3-DJ production integration.
 
 Record those as separate validation gates.
+
+Host acceptance procedures must be fail-closed: verify required command
+presence, assert exact source identity, and use `set -euo pipefail` (or an
+equivalent checked chain) so a failed gate cannot reach the final PASS marker.
+`command-not-found`, missing bounded client reachability, health failure, and
+browser failure are failures or explicit `HOST_VALIDATION_REQUIRED` states;
+they are not replaced with `free`, `skipped`, or a plausible-looking PASS.
