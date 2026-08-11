@@ -85,7 +85,25 @@ It does **not** own:
 - Outline/deformation contract: [`docs/OUTLINE-RULES.md`](docs/OUTLINE-RULES.md)
 - Motion language: [`docs/MOTION-LANGUAGE.md`](docs/MOTION-LANGUAGE.md)
 - Security/runtime boundaries: [`docs/SECURITY.md`](docs/SECURITY.md)
+- Runtime implementation: [`runtime/README.md`](runtime/README.md)
 - Agentic PR request template: [`.agent/PR_REQUEST_TEMPLATE.md`](.agent/PR_REQUEST_TEMPLATE.md)
+
+## Implemented runtime surface (PR-001)
+
+The bootstrap runtime ships a deterministic placeholder (no Live2D model):
+
+```text
+GET /healthz   machine-readable readiness JSON
+GET /api/state real runtime state (placeholder model)
+GET /          clean avatar output surface
+GET /debug     validation surface
+```
+
+- Docker service: `compose.yaml` (host bind `AVATAR_HOST_BIND`, loopback-only by default)
+- Bounded lifecycle: `./scripts/avatar-runtime start|stop|restart|status|logs`
+- Config: `AVATAR_BIND` (bare process), `AVATAR_HOST_BIND` (compose host exposure), `AVATAR_PORT` (default `127.0.0.1:8930`, loopback-only)
+
+Full commands and validation instructions: `runtime/README.md`.
 
 ## Planned runtime surface
 
@@ -122,4 +140,12 @@ Initial development port candidate: `8930`. Secure binding and remote access pol
 
 ## Current status
 
-🚧 Early bootstrap. No production Live2D model or production avatar runtime is implied by the repository existing.
+🚧 Early bootstrap. The repository contract is in place and the **Avatar
+Runtime skeleton** (PR-001) is the first implementation stage: a Dockerized
+host service with `/healthz`, `/api/state`, `/`, `/debug`, env-based
+bind/port, a bounded lifecycle script, and a placeholder model path — all
+verifiable without any Live2D asset.
+
+No production Live2D model, rig, or production avatar runtime is implied by
+the repository existing. Host deployment acceptance (real Docker lifecycle
+on the Ubuntu host) is an operator gate (`HOST_VALIDATION_REQUIRED`).

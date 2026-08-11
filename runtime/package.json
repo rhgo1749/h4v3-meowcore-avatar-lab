@@ -1,0 +1,22 @@
+{
+  "name": "meowcore-avatar-runtime",
+  "version": "0.1.0",
+  "description": "Host-served Meowcore Avatar Runtime (PR-001 bootstrap skeleton)",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node --test",
+    "typecheck": "tsc",
+    "smoke:browser": "node smoke/browser-smoke.js"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "playwright": "^1.62.1",
+    "typescript": "^7.0.2"
+  }
+}

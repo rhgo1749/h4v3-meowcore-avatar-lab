@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Avatar Runtime /debug</title>
+  <style>
+    :root {
+      --ink: #1a1a1a;
+      --paper: #f4f4ee;
+      --muted: #6d6d63;
+      --good: #1c7a3d;
+      --bad: #b3261e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 1.5rem;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: ui-monospace, "SF Mono", Consolas, monospace;
+      font-size: 0.85rem;
+      line-height: 1.55;
+    }
+    h1 { font-size: 1.1rem; }
+    h2 { font-size: 0.95rem; margin-top: 1.5rem; }
+    pre {
+      background: #fff;
+      border: 1px solid #d8d8cc;
+      padding: 0.75rem;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    button {
+      font: inherit;
+      padding: 0.35rem 0.8rem;
+      border: 1px solid var(--ink);
+      background: #fff;
+      cursor: pointer;
+    }
+    .ok { color: var(--good); }
+    .bad { color: var(--bad); }
+    .note { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <h1>Avatar Runtime — debug / validation surface</h1>
+  <p class="note">PR-001 placeholder: no real Live2D model is loaded. This page
+    verifies the host-served runtime boundary (health + state), not art quality.</p>
+
+  <h2>Checks</h2>
+  <button id="refresh" type="button">re-run checks</button>
+  <ul id="checks">
+    <li id="check-health" class="note">pending…</li>
+    <li id="check-state" class="note">pending…</li>
+  </ul>
+
+  <h2>/healthz</h2>
+  <pre id="healthz">(not fetched)</pre>
+
+  <h2>/api/state</h2>
+  <pre id="state">(not fetched)</pre>
+
+  <p><a href="/">back to avatar output</a></p>
+
+  <script>
+    async function fetchJson(path) {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error(path + " -> HTTP " + res.status);
+      return res.json();
+    }
+
+    function setCheck(id, ok, text) {
+      const el = document.getElementById(id);
+      el.className = ok ? "ok" : "bad";
+      el.textContent = text;
+    }
+
+    async function runChecks() {
+      const healthEl = document.getElementById("healthz");
+      const stateEl = document.getElementById("state");
+      healthEl.textContent = "(fetching…)";
+      stateEl.textContent = "(fetching…)";
+      try {
+        const health = await fetchJson("/healthz");
+        healthEl.textContent = JSON.stringify(health, null, 2);
+        setCheck("check-health",
+          health.status === "ok" && health.ready === true,
+          "GET /healthz -> " + health.status + " (ready=" + health.ready + ")");
+      } catch (err) {
+        healthEl.textContent = "fetch failed: " + err.message;
+        setCheck("check-health", false, "GET /healthz failed: " + err.message);
+      }
+      try {
+        const state = await fetchJson("/api/state");
+        stateEl.textContent = JSON.stringify(state, null, 2);
+        setCheck("check-state",
+          state.model && state.model.kind === "placeholder",
+          "GET /api/state -> placeholder model reported");
+      } catch (err) {
+        stateEl.textContent = "fetch failed: " + err.message;
+        setCheck("check-state", false, "GET /api/state failed: " + err.message);
+      }
+    }
+
+    document.getElementById("refresh").addEventListener("click", runChecks);
+    runChecks();
+  </script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meowcore Avatar</title>
+  <style>
+    :root {
+      --ink: #1a1a1a;
+      --paper: #fdfdf8;
+      --accent: #e8462a;
+      --muted: #8a8a80;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    h1 { font-size: 1.6rem; margin: 0; letter-spacing: 0.02em; }
+    #avatar-stage {
+      width: 320px;
+      height: 320px;
+      border: 3px solid var(--ink);
+      background: #fff;
+      display: grid;
+      place-items: center;
+      position: relative;
+    }
+    #avatar-stage .placeholder {
+      text-align: center;
+      padding: 1rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+    #avatar-stage .placeholder strong {
+      display: block;
+      color: var(--ink);
+      font-size: 1rem;
+      margin-bottom: 0.35rem;
+    }
+    #runtime-status {
+      font-size: 0.85rem;
+      color: var(--muted);
+      text-align: center;
+      min-height: 1.4em;
+    }
+    #runtime-status .ok { color: #1c7a3d; }
+    a { color: var(--accent); }
+    footer { font-size: 0.75rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <h1>Meowcore Avatar</h1>
+
+  <!-- Live2D renderer will mount here in a later PR. -->
+  <div id="avatar-stage" aria-label="avatar output stage">
+    <div class="placeholder">
+      <strong>No Live2D model loaded</strong>
+      PR-001 placeholder surface.<br />
+      Runtime is served by this host.
+    </div>
+  </div>
+
+  <div id="runtime-status">checking runtime…</div>
+
+  <p><a href="/debug">debug / validation surface</a></p>
+  <footer>meowcore avatar runtime · host-served service</footer>
+
+  <script>
+    (async () => {
+      const el = document.getElementById("runtime-status");
+      try {
+        const res = await fetch("/api/state");
+        if (!res.ok) throw new Error("state fetch failed: " + res.status);
+        const state = await res.json();
+        const model = state.model && state.model.loaded
+          ? state.model.id
+          : "placeholder (no model)";
+        // Build the status line with DOM nodes only: model id/version will
+        // later come from exported model metadata, so avoid string-built
+        // markup here (XSS guard: public.test.js).
+        el.textContent = "";
+        const ok = document.createElement("span");
+        ok.className = "ok";
+        ok.textContent = "runtime ok";
+        el.append(ok);
+        el.append(" · v" + state.version + " · model: " + model);
+      } catch (err) {
+        el.textContent = "runtime state unavailable: " + err.message;
+      }
+    })();
+  </script>
+</body>
+</html>
