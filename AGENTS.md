@@ -86,6 +86,16 @@ Ubuntu Host
 8. branch를 push하고 한국어 PR을 연다.
 9. merge는 사용자/사람 권한으로 남긴다.
 
+## Checkout role invariant
+
+아래 세 checkout 역할을 서로 바꾸어 사용하지 않는다.
+
+1. **Development checkout/worktree** — Hermes container 또는 승인된 개발 환경에서 source 변경, repository validation, branch/PR delivery에 사용한다.
+2. **Ephemeral host validation checkout** — 미병합 PR의 Ubuntu host acceptance에만 사용한다. run-owned 임시 clone에서 exact `pull/<PR>/head`를 fetch하고 기대 SHA와 `HEAD`가 일치함을 assert한 뒤 검증하며, 검증이 끝나면 정리할 수 있다.
+3. **Persistent deployment checkout** — Ubuntu host의 장기 배포용 checkout이다. 사람 merge 이후에만 clean `main`을 `origin/main`으로 fast-forward한 뒤 rebuild/restart한다. 이 checkout에서 PR branch switch, detached PR ref checkout, pre-merge acceptance를 수행하지 않는다.
+
+Host validation을 수행할 권한/환경이 없으면 `HOST_VALIDATION_REQUIRED`로 handoff하고, 그 편의를 위해 Hermes에 Docker socket/root/broad sudo를 추가하지 않는다. Ephemeral validation의 PASS는 persistent deployment 완료를 의미하지 않으며, post-merge deployment 결과는 별도 evidence로 기록한다.
+
 ## Repository / host / human validation boundary
 
 ### Repository-verifiable
