@@ -11,9 +11,9 @@
 - Pull request language: Korean
 - Request path: `.agent/pr-requests/PR-002-host-validation-deployment-contract.md`
 - Merge authority: Human/user only
-- Source issue: to be created immediately after this request file
+- Source issue: `rhgo1749/h4v3-meowcore-avatar-lab#4`
 - Kanban task ID: assigned by Hermes intake
-- Intake idempotency key: assigned from source Issue number
+- Intake idempotency key: `github:rhgo1749/h4v3-meowcore-avatar-lab:issue:4`
 - Planning/lead owner: Luna lead
 - Implementation owner: Luna lead and/or delegated Luna workers
 - Automation stop state: NONE unless host validation is needed to prove a changed helper/script
@@ -56,7 +56,7 @@ Ubuntu Host
 - Hermes 내부 checkout을 Ubuntu host checkout으로 오인하지 않는다.
 - host validation을 위해 Hermes에 Docker socket/root/broad host 권한을 추가하지 않는다.
 - 미병합 PR 검증 때문에 persistent production checkout을 branch-switch/worktree 대상으로 사용하지 않는다.
-- PR host acceptance는 exact PR head를 `/tmp` ephemeral clone에서 검증한다.
+- PR host acceptance는 exact `pull/<PR>/head`를 `/tmp` ephemeral clone에서 검증한다.
 - merge 후에만 persistent deployment checkout을 `main`으로 fast-forward하고 runtime을 rebuild/restart한다.
 
 ## 2. Confirmed background
@@ -197,7 +197,7 @@ Luna lead는 current main 문서와 PR #3에서 확정된 실제 topology를 먼
 - Intentionally not implemented:
 
 ### Provenance
-- Source issue:
+- Source issue: `rhgo1749/h4v3-meowcore-avatar-lab#4`
 - Kanban task:
 - Request path: `.agent/pr-requests/PR-002-host-validation-deployment-contract.md`
 - Lead/delegated workers:
