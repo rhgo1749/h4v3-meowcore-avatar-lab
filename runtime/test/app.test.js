@@ -159,6 +159,11 @@ test('GET /api/state reports placeholder runtime state', async () => {
   });
   assert.equal(body.semantic.events.beatCount, 0);
   assert.equal(body.semantic.schema.angleX.min, -30);
+  assert.deepEqual(body.semantic.schema.blink.meaning, {
+    min: 'eyes open',
+    default: 'eyes open',
+    max: 'eyes fully closed',
+  });
 });
 
 test('POST /api/control clamps a known semantic control and exposes server state', async () => {

@@ -93,16 +93,22 @@ GET /debug     deterministic semantic control and state validation surface
 The server owns the semantic state. The public ids are deliberately not
 Cubism/ArtMesh ids:
 
-| ID | Default | Min | Max | Unit |
-|---|---:|---:|---:|---|
-| `angleX` | 0 | -30 | 30 | degrees |
-| `angleY` | 0 | -20 | 20 | degrees |
-| `bodyX` | 0 | -1 | 1 | normalized |
-| `blink` | 0 | 0 | 1 | normalized |
-| `mouth` | 0 | 0 | 1 | normalized |
-| `smile` | 0 | -1 | 1 | normalized |
-| `squash` | 0 | -1 | 1 | normalized |
-| `bounce` | 0 | 0 | 1 | normalized |
+| ID | Default | Min | Max | Unit | Meaning at min / default / max |
+|---|---:|---:|---:|---|---|
+| `angleX` | 0 | -30 | 30 | degrees | avatar turns toward its left / faces forward / avatar turns toward its right |
+| `angleY` | 0 | -20 | 20 | degrees | looks down / looks level / looks up |
+| `bodyX` | 0 | -1 | 1 | normalized | body moves toward avatar's left / body is centered / body moves toward avatar's right |
+| `blink` | 0 | 0 | 1 | normalized | eyes open / eyes open / eyes fully closed |
+| `mouth` | 0 | 0 | 1 | normalized | mouth closed / mouth closed / mouth fully open |
+| `smile` | 0 | -1 | 1 | normalized | frown / neutral / smile |
+| `squash` | 0 | -1 | 1 | normalized | vertical stretch / neutral / vertical squash |
+| `bounce` | 0 | 0 | 1 | normalized | neutral / neutral / maximum debug bounce amplitude |
+
+The meaning column is also published as `semantic.schema.<id>.meaning` in
+`GET /api/state` with explicit `min`, `default`, and `max` fields. A future M3
+adapter must consume those semantic meanings without inferring direction from
+Cubism parameter conventions; Cubism-specific ids remain internal to that
+adapter.
 
 Numeric values outside these ranges are clamped. Unknown ids, non-finite
 values, malformed JSON, extra request fields, and oversized bodies are

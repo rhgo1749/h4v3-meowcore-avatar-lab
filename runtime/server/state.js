@@ -7,6 +7,14 @@
  * adapter consumes this semantic layer; Cubism parameter ids must not leak
  * into the HTTP API.
  */
+function meaning(min, defaultMeaning, max) {
+  return Object.freeze({
+    min,
+    default: defaultMeaning,
+    max,
+  });
+}
+
 const CONTROL_SCHEMA = Object.freeze({
   angleX: Object.freeze({
     label: 'Angle X',
@@ -15,6 +23,11 @@ const CONTROL_SCHEMA = Object.freeze({
     max: 30,
     step: 1,
     unit: 'degrees',
+    meaning: meaning(
+      'avatar turns toward its left',
+      'avatar faces forward',
+      'avatar turns toward its right'
+    ),
   }),
   angleY: Object.freeze({
     label: 'Angle Y',
@@ -23,6 +36,7 @@ const CONTROL_SCHEMA = Object.freeze({
     max: 20,
     step: 1,
     unit: 'degrees',
+    meaning: meaning('avatar looks down', 'avatar looks level', 'avatar looks up'),
   }),
   bodyX: Object.freeze({
     label: 'Body X',
@@ -31,6 +45,11 @@ const CONTROL_SCHEMA = Object.freeze({
     max: 1,
     step: 0.05,
     unit: 'normalized',
+    meaning: meaning(
+      'body moves toward avatar\'s left',
+      'body is centered',
+      'body moves toward avatar\'s right'
+    ),
   }),
   blink: Object.freeze({
     label: 'Blink',
@@ -39,6 +58,7 @@ const CONTROL_SCHEMA = Object.freeze({
     max: 1,
     step: 0.01,
     unit: 'normalized',
+    meaning: meaning('eyes open', 'eyes open', 'eyes fully closed'),
   }),
   mouth: Object.freeze({
     label: 'Mouth',
@@ -47,6 +67,7 @@ const CONTROL_SCHEMA = Object.freeze({
     max: 1,
     step: 0.01,
     unit: 'normalized',
+    meaning: meaning('mouth closed', 'mouth closed', 'mouth fully open'),
   }),
   smile: Object.freeze({
     label: 'Smile',
@@ -55,6 +76,7 @@ const CONTROL_SCHEMA = Object.freeze({
     max: 1,
     step: 0.01,
     unit: 'normalized',
+    meaning: meaning('frown', 'neutral', 'smile'),
   }),
   squash: Object.freeze({
     label: 'Squash',
@@ -63,6 +85,7 @@ const CONTROL_SCHEMA = Object.freeze({
     max: 1,
     step: 0.01,
     unit: 'normalized',
+    meaning: meaning('vertical stretch', 'neutral', 'vertical squash'),
   }),
   bounce: Object.freeze({
     label: 'Bounce',
@@ -71,6 +94,11 @@ const CONTROL_SCHEMA = Object.freeze({
     max: 1,
     step: 0.01,
     unit: 'normalized',
+    meaning: meaning(
+      'neutral',
+      'neutral',
+      'maximum debug bounce amplitude'
+    ),
   }),
 });
 

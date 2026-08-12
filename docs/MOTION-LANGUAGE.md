@@ -65,6 +65,25 @@ values, and clamp numeric values to the schema range. This keeps the M3
 renderer/model adapter boundary semantic instead of exposing Cubism-specific
 parameter ids.
 
+The direction and endpoint meanings are part of the same contract, not an
+adapter convention:
+
+| Control | Minimum | Default | Maximum |
+|---|---|---|---|
+| `angleX` | avatar turns toward its left | avatar faces forward | avatar turns toward its right |
+| `angleY` | avatar looks down | avatar looks level | avatar looks up |
+| `bodyX` | body moves toward avatar's left | body is centered | body moves toward avatar's right |
+| `blink` | eyes open | eyes open | eyes fully closed |
+| `mouth` | mouth closed | mouth closed | mouth fully open |
+| `smile` | frown | neutral | smile |
+| `squash` | vertical stretch | neutral | vertical squash |
+| `bounce` | neutral | neutral | maximum debug bounce amplitude |
+
+These meanings are returned by `GET /api/state` under each schema entry's
+`meaning.min`, `meaning.default`, and `meaning.max` fields. In particular,
+`blink=1` means fully closed, `mouth=1` means fully open, and the signed
+controls use the explicitly listed left/right or stretch/squash directions.
+
 ## Live2D implication
 
 Do not assume every reaction must be expressed as one continuously deforming parameter. Large cartoon reactions may be better represented by alternate art states, correction deformers, discrete expression assets, or deliberately stepped parameter transitions.

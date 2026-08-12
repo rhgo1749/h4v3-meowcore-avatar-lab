@@ -26,9 +26,53 @@ test('semantic schema has eight stable controls with defaults inside ranges', ()
   for (const [id, spec] of Object.entries(CONTROL_SCHEMA)) {
     assert.equal(typeof spec.label, 'string', `${id} label`);
     assert.equal(typeof spec.step, 'number', `${id} step`);
+    assert.deepEqual(Object.keys(spec.meaning), ['min', 'default', 'max'], `${id} meaning keys`);
     assert.equal(spec.default >= spec.min, true, `${id} default lower bound`);
     assert.equal(spec.default <= spec.max, true, `${id} default upper bound`);
   }
+});
+
+test('semantic meaning fixes adapter-facing direction and value interpretation', () => {
+  assert.deepEqual(CONTROL_SCHEMA.angleX.meaning, {
+    min: 'avatar turns toward its left',
+    default: 'avatar faces forward',
+    max: 'avatar turns toward its right',
+  });
+  assert.deepEqual(CONTROL_SCHEMA.angleY.meaning, {
+    min: 'avatar looks down',
+    default: 'avatar looks level',
+    max: 'avatar looks up',
+  });
+  assert.deepEqual(CONTROL_SCHEMA.bodyX.meaning, {
+    min: 'body moves toward avatar\'s left',
+    default: 'body is centered',
+    max: 'body moves toward avatar\'s right',
+  });
+  assert.deepEqual(CONTROL_SCHEMA.blink.meaning, {
+    min: 'eyes open',
+    default: 'eyes open',
+    max: 'eyes fully closed',
+  });
+  assert.deepEqual(CONTROL_SCHEMA.mouth.meaning, {
+    min: 'mouth closed',
+    default: 'mouth closed',
+    max: 'mouth fully open',
+  });
+  assert.deepEqual(CONTROL_SCHEMA.smile.meaning, {
+    min: 'frown',
+    default: 'neutral',
+    max: 'smile',
+  });
+  assert.deepEqual(CONTROL_SCHEMA.squash.meaning, {
+    min: 'vertical stretch',
+    default: 'neutral',
+    max: 'vertical squash',
+  });
+  assert.deepEqual(CONTROL_SCHEMA.bounce.meaning, {
+    min: 'neutral',
+    default: 'neutral',
+    max: 'maximum debug bounce amplitude',
+  });
 });
 
 test('updateControl clamps every continuous control and counts accepted updates', () => {
