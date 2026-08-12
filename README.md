@@ -114,16 +114,12 @@ Full commands and validation instructions: `runtime/README.md`.
 The following remain future work and are deliberately not fake endpoints:
 
 ```text
-GET  /healthz
-GET  /api/state
 POST /api/reload
 POST /api/expression
 POST /api/motion
 POST /api/parameter
 WS   /ws/events
 
-/                 avatar output
-/debug            semantic control/state test surface
 /expressions      expression QA
 /motion           motion QA
 /outline-test     deformation / outline torture test
@@ -145,8 +141,9 @@ Initial development port candidate: `8930`. Secure binding and remote access pol
 ## Current status
 
 🚧 Early bootstrap. The repository contract is in place and the **Avatar
-Runtime skeleton** (PR-001) is the first implementation stage: a Dockerized
-host service with `/healthz`, `/api/state`, `/`, `/debug`, env-based
+Runtime skeleton** (PR-001) plus the **M2 semantic control surface** are
+implemented: a Dockerized host service with `/healthz`, `/api/state`,
+`/api/control`, `/api/reset`, `/api/beat`, `/`, and `/debug`, env-based
 bind/port, a bounded lifecycle script, and a placeholder model path — all
 verifiable without any Live2D asset.
 

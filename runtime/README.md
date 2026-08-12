@@ -24,7 +24,7 @@ Requirements from `.agent/pr-requests/PR-001-avatar-runtime-bootstrap.md`:
 Using only the Node.js standard library (`node:http`, `node:test`) keeps the
 runtime dependency-free: no supply-chain surface, tiny image, reproducible
 anywhere with Node >= 20. A framework (Express/Fastify) adds nothing for the
-current four routes.
+current bounded M2 HTTP surface.
 
 Rejected: bundling a Live2D SDK now (no licensed model asset yet, no
 semantics to implement — would be a fake endpoint); Python/FastAPI (fine
