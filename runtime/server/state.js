@@ -158,19 +158,26 @@ function triggerBeat(state, now = Date.now()) {
 /**
  * Runtime state singleton.
  *
- * The model remains a deterministic placeholder, while semantic controls and
- * beat events are real server-owned state. No persistence is needed for this
- * debug/test surface.
+ * The default model remains a deterministic placeholder, while semantic
+ * controls and beat events are real server-owned state. M3 passes the model
+ * registry descriptor in so /api/state and /healthz reflect the configured
+ * (cubism) model without changing the public semantic contract. No
+ * persistence is needed for this debug/test surface.
  */
 
-function createState() {
+function createState(model) {
   return {
     startedAt: Date.now(),
-    model: {
-      id: 'placeholder-none',
-      loaded: false,
-      kind: 'placeholder',
-    },
+    model:
+      model === undefined
+        ? {
+            id: 'placeholder-none',
+            loaded: false,
+            kind: 'placeholder',
+            ready: true,
+            error: null,
+          }
+        : model,
     parameters: {},
     controls: getControlDefaults(),
     events: {

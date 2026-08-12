@@ -22,6 +22,14 @@ services:
       # publish mapping. Host-side exposure is AVATAR_HOST_BIND's job.
       AVATAR_BIND: "0.0.0.0"
       AVATAR_PORT: "${AVATAR_PORT:-8930}"
+      # M3: configured model id; empty default keeps the deterministic
+      # placeholder. Licensed model files are mounted read-only below.
+      AVATAR_MODEL_ID: "${AVATAR_MODEL_ID:-}"
       NODE_ENV: "production"
     ports:
       - "${AVATAR_HOST_BIND:-127.0.0.1}:${AVATAR_PORT:-8930}:${AVATAR_PORT:-8930}"
+    # M3: operator-provided licensed model manifests/assets. The repo ships
+    # no model binaries; mount a host directory containing
+    # <modelId>/manifest.json (+ model3/moc3/textures) read-only.
+    volumes:
+      - "${AVATAR_MODELS_DIR_HOST:-./models/runtime}:/srv/avatar-runtime/models/runtime:ro"

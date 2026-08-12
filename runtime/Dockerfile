@@ -11,11 +11,17 @@ RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund && \
 
 COPY server ./server
 COPY public ./public
+COPY shared ./shared
+
+# M3 model manifest root: the repo ships no licensed model binaries; the
+# compose service mounts operator-provided manifests/assets read-only here.
+RUN mkdir -p models/runtime
 
 # Defaults match the repository contract (.env.example). Compose overrides
 # AVATAR_BIND at runtime (see compose.yaml); these apply to direct `docker run`.
 ENV AVATAR_BIND=127.0.0.1 \
     AVATAR_PORT=8930 \
+    AVATAR_MODELS_DIR=/srv/avatar-runtime/models/runtime \
     NODE_ENV=production
 
 EXPOSE 8930

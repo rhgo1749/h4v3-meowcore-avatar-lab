@@ -3,48 +3,67 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Avatar Runtime /debug</title>
+  <title>Meowcore Avatar Lab — visual dashboard (/debug)</title>
   <style>
     :root {
       --ink: #1a1a1a;
       --paper: #f4f4ee;
+      --panel: #ffffff;
+      --line: #d8d8cc;
       --muted: #6d6d63;
       --good: #1c7a3d;
       --bad: #b3261e;
+      --accent: #e8462a;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 1.5rem;
+      padding: 1.25rem;
       background: var(--paper);
       color: var(--ink);
       font-family: ui-monospace, "SF Mono", Consolas, monospace;
       font-size: 0.85rem;
       line-height: 1.55;
     }
-    h1 { font-size: 1.1rem; }
-    h2 { font-size: 0.95rem; margin-top: 1.5rem; }
+    h1 { font-size: 1.15rem; margin: 0 0 0.25rem; }
+    h2 { font-size: 0.95rem; margin: 0 0 0.6rem; }
+    h3 { font-size: 0.85rem; margin: 1rem 0 0.4rem; }
+    header p { margin: 0.15rem 0; }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(24rem, 1.2fr) minmax(22rem, 1fr);
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 0.75rem;
+      min-width: 0;
+    }
     pre {
       background: #fff;
-      border: 1px solid #d8d8cc;
-      padding: 0.75rem;
+      border: 1px solid var(--line);
+      padding: 0.6rem;
       overflow-x: auto;
       white-space: pre-wrap;
       word-break: break-all;
+      margin: 0.4rem 0;
     }
     button {
       font: inherit;
-      padding: 0.35rem 0.8rem;
+      padding: 0.3rem 0.7rem;
       border: 1px solid var(--ink);
       background: #fff;
       cursor: pointer;
     }
+    button.primary { background: var(--ink); color: #fff; }
     .ok { color: var(--good); }
     .bad { color: var(--bad); }
     .note { color: var(--muted); }
     .controls {
       display: grid;
-      gap: 0.65rem;
+      gap: 0.55rem;
       max-width: 42rem;
     }
     .control {
@@ -53,224 +72,563 @@
       gap: 0.75rem;
       align-items: center;
       background: #fff;
-      border: 1px solid #d8d8cc;
-      padding: 0.55rem 0.7rem;
+      border: 1px solid var(--line);
+      padding: 0.5rem 0.7rem;
     }
     .control output { text-align: right; }
     input[type="range"] { width: 100%; }
     input[type="number"] { width: 100%; font: inherit; }
-    .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
-    #message { min-height: 1.55em; }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.6rem 0; }
+    #message { min-height: 1.55em; margin: 0.4rem 0; }
+    #viewport-frame {
+      border: 2px solid var(--ink);
+      background: #fff;
+      position: relative;
+    }
+    #viewport {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    #event-log {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      max-height: 16rem;
+      overflow-y: auto;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    #event-log li { padding: 0.2rem 0.5rem; border-bottom: 1px dashed var(--line); }
+    #event-log li .time { color: var(--muted); margin-right: 0.5rem; }
+    table#mapped-params {
+      border-collapse: collapse;
+      width: 100%;
+      background: #fff;
+    }
+    table#mapped-params th, table#mapped-params td {
+      border: 1px solid var(--line);
+      padding: 0.25rem 0.5rem;
+      text-align: left;
+    }
+    table#mapped-params td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .chip {
+      display: inline-block;
+      border: 1px solid var(--line);
+      padding: 0 0.4rem;
+      margin-right: 0.4rem;
+      background: #fff;
+    }
+    #checks { margin: 0.4rem 0; padding-left: 1.2rem; }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
-  <h1>Avatar Runtime — debug / validation surface</h1>
-  <p class="note">M2 semantic control surface: the server owns state; no real
-    Live2D model is loaded. This page verifies control semantics, not art quality.</p>
+  <header>
+    <h1>Meowcore Avatar Lab — visual dashboard</h1>
+    <p id="runtime-status" class="note">checking runtime…</p>
+    <p id="model-status" class="note">checking model…</p>
+    <p id="health-short" class="note">pending…</p>
+  </header>
 
-  <h2>Semantic controls</h2>
-  <div id="controls" class="controls" aria-live="polite">
-    <p id="controls-loading" class="note">loading control contract…</p>
-  </div>
-  <div class="actions">
-    <button id="reset" type="button">reset defaults</button>
-    <button id="beat" type="button">trigger beat</button>
-    <button id="refresh" type="button">refresh state</button>
-  </div>
-  <p id="message" class="note" role="status">pending…</p>
+  <main class="grid">
+    <section id="viewport-section">
+      <h2>Live model viewport</h2>
+      <div id="viewport-frame">
+        <canvas id="viewport" width="640" height="640"
+          aria-label="avatar model viewport"></canvas>
+      </div>
+      <p id="viewport-note" class="note">loading renderer…</p>
+    </section>
 
-  <h2>Checks</h2>
-  <ul id="checks">
-    <li id="check-health" class="note">pending…</li>
-    <li id="check-state" class="note">pending…</li>
-    <li id="check-controls" class="note">pending…</li>
-  </ul>
+    <section id="controls-section">
+      <h2>Semantic controls (M2 contract)</h2>
+      <div id="controls" class="controls" aria-live="polite">
+        <p id="controls-loading" class="note">loading control contract…</p>
+      </div>
 
-  <h2>/healthz</h2>
-  <pre id="healthz">(not fetched)</pre>
+      <h3>Presets / torture tests</h3>
+      <div id="presets" class="actions" aria-label="preset actions"></div>
 
-  <h2>/api/state</h2>
-  <pre id="state">(not fetched)</pre>
+      <div class="actions">
+        <button id="reset" type="button">reset defaults</button>
+        <button id="beat" type="button">trigger beat</button>
+        <button id="refresh" type="button">refresh state</button>
+      </div>
+      <p id="message" class="note" role="status">pending…</p>
+    </section>
 
-  <p><a href="/">back to avatar output</a></p>
+    <section id="log-section">
+      <h2>Event / validation log</h2>
+      <ul id="event-log" aria-label="event log"></ul>
+      <p id="log-empty" class="note">no events yet</p>
+    </section>
 
+    <section id="inspector-section">
+      <h2>Runtime inspector</h2>
+      <h3>Model</h3>
+      <div id="inspector-model" class="note">pending…</div>
+
+      <h3>Mapped Cubism parameters (read-only)</h3>
+      <table id="mapped-params" aria-label="mapped cubism parameters">
+        <thead>
+          <tr><th>semantic</th><th>cubism parameter</th><th>value</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="mapped-note" class="note">pending…</p>
+
+      <h3>Current semantic state</h3>
+      <pre id="state">(not fetched)</pre>
+
+      <h3>Events</h3>
+      <p id="beat-count" class="note">beats: 0</p>
+
+      <h3>Checks</h3>
+      <ul id="checks">
+        <li id="check-health" class="note">pending…</li>
+        <li id="check-state" class="note">pending…</li>
+        <li id="check-controls" class="note">pending…</li>
+        <li id="check-model" class="note">pending…</li>
+        <li id="check-viewport" class="note">pending…</li>
+      </ul>
+
+      <h3>/healthz</h3>
+      <pre id="healthz">(not fetched)</pre>
+    </section>
+  </main>
+
+  <p class="note"><a href="/">back to avatar output</a> · <a href="/api/model">/api/model</a></p>
+
+  <script src="/js/mapping.js"></script>
+  <script src="/live2d/renderer.js"></script>
   <script>
-    async function fetchJson(path, options) {
-      const res = await fetch(path, options);
-      let body;
-      try {
-        body = await res.json();
-      } catch {
-        throw new Error(path + " -> invalid JSON response");
-      }
-      if (!res.ok) {
-        throw new Error((body.code || "request_failed") + ": " + (body.message || res.status));
-      }
-      return body;
-    }
+    (function () {
+      "use strict";
 
-    function setCheck(id, ok, text) {
-      const el = document.getElementById(id);
-      el.className = ok ? "ok" : "bad";
-      el.textContent = text;
-    }
-
-    function setMessage(text, ok) {
-      const el = document.getElementById("message");
-      el.className = ok ? "ok" : "bad";
-      el.textContent = text;
-    }
-
-    let mutationQueue = Promise.resolve();
-
-    function enqueueMutation(task) {
-      mutationQueue = mutationQueue.catch(() => {}).then(task);
-      return mutationQueue;
-    }
-
-    function controlElement(id, spec, value) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "control";
-      wrapper.id = "control-" + id;
-
-      const label = document.createElement("label");
-      label.htmlFor = "range-" + id;
-      label.textContent = spec.label + " (" + spec.unit + ")";
-
-      const range = document.createElement("input");
-      range.id = "range-" + id;
-      range.type = "range";
-      range.min = String(spec.min);
-      range.max = String(spec.max);
-      range.step = String(spec.step);
-      range.value = String(value);
-      range.setAttribute("aria-label", spec.label);
-
-      const number = document.createElement("input");
-      number.id = "value-" + id;
-      number.type = "number";
-      number.min = String(spec.min);
-      number.max = String(spec.max);
-      number.step = String(spec.step);
-      number.value = String(value);
-      number.setAttribute("aria-label", spec.label + " numeric value");
-
-      function showValue(next) {
-        range.value = next;
-        number.value = next;
-      }
-
-      function updateLocal(event) {
-        showValue(event.target.value);
-      }
-
-      async function commit(event) {
-        const valueToSend = Number(event.target.value);
-        if (!Number.isFinite(valueToSend)) {
-          setMessage(spec.label + ": enter a finite number", false);
-          showValue(String(value));
-          return;
+      async function fetchJson(path, options) {
+        const res = await fetch(path, options);
+        let body;
+        try {
+          body = await res.json();
+        } catch {
+          throw new Error(path + " -> invalid JSON response");
         }
+        if (!res.ok) {
+          throw new Error((body.code || "request_failed") + ": " + (body.message || res.status));
+        }
+        return body;
+      }
+
+      function setCheck(id, ok, text) {
+        const el = document.getElementById(id);
+        el.className = ok ? "ok" : "bad";
+        el.textContent = text;
+      }
+
+      function setMessage(text, ok) {
+        const el = document.getElementById("message");
+        el.className = ok ? "ok" : "bad";
+        el.textContent = text;
+      }
+
+      const LOG_MAX = 50;
+
+      function logEvent(kind, text) {
+        const list = document.getElementById("event-log");
+        const empty = document.getElementById("log-empty");
+        if (empty) empty.textContent = "";
+        const li = document.createElement("li");
+        const time = document.createElement("span");
+        time.className = "time";
+        time.textContent = new Date().toISOString().slice(11, 19);
+        const body = document.createElement("span");
+        body.className = kind === "error" ? "bad" : kind === "ok" ? "ok" : "";
+        body.textContent = text;
+        li.append(time, body);
+        list.prepend(li);
+        while (list.children.length > LOG_MAX) {
+          list.removeChild(list.lastChild);
+        }
+      }
+
+      let mutationQueue = Promise.resolve();
+
+      function enqueueMutation(task) {
+        mutationQueue = mutationQueue.catch(() => {}).then(task);
+        return mutationQueue;
+      }
+
+      // ---- semantic controls (M2 contract) ----
+
+      function controlElement(id, spec, value) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "control";
+        wrapper.id = "control-" + id;
+
+        const label = document.createElement("label");
+        label.htmlFor = "range-" + id;
+        label.textContent = spec.label + " (" + spec.unit + ")";
+
+        const range = document.createElement("input");
+        range.id = "range-" + id;
+        range.type = "range";
+        range.min = String(spec.min);
+        range.max = String(spec.max);
+        range.step = String(spec.step);
+        range.value = String(value);
+        range.setAttribute("aria-label", spec.label);
+
+        const number = document.createElement("input");
+        number.id = "value-" + id;
+        number.type = "number";
+        number.min = String(spec.min);
+        number.max = String(spec.max);
+        number.step = String(spec.step);
+        number.value = String(value);
+        number.setAttribute("aria-label", spec.label + " numeric value");
+
+        function showValue(next) {
+          range.value = next;
+          number.value = next;
+        }
+
+        function updateLocal(event) {
+          showValue(event.target.value);
+        }
+
+        async function commit(event) {
+          const valueToSend = Number(event.target.value);
+          if (!Number.isFinite(valueToSend)) {
+            setMessage(spec.label + ": enter a finite number", false);
+            showValue(String(value));
+            return;
+          }
+          await enqueueMutation(async () => {
+            try {
+              const result = await fetchJson("/api/control", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ id, value: valueToSend })
+              });
+              showValue(String(result.control.value));
+              setMessage(spec.label + " updated on runtime", true);
+              await refreshState();
+            } catch (err) {
+              setMessage("control update failed: " + err.message, false);
+              logEvent("error", "control update failed: " + err.message);
+              await refreshState();
+            }
+          });
+        }
+
+        range.addEventListener("input", updateLocal);
+        range.addEventListener("change", commit);
+        number.addEventListener("input", updateLocal);
+        number.addEventListener("change", commit);
+        wrapper.append(label, range, number);
+        return wrapper;
+      }
+
+      function renderControls(state) {
+        const container = document.getElementById("controls");
+        container.textContent = "";
+        const controlIds = Object.keys(state.semantic.schema);
+        for (const id of controlIds) {
+          const spec = state.semantic.schema[id];
+          if (!spec) {
+            throw new Error("missing control schema: " + id);
+          }
+          container.append(controlElement(id, spec, state.semantic.controls[id]));
+        }
+        setCheck("check-controls", controlIds.length === 8,
+          "semantic controls -> " + controlIds.length + " available");
+      }
+
+      // ---- presets / torture tests (M3) ----
+
+      const PRESETS = {
+        "Neutral": null,
+        "Left": { angleX: -30 },
+        "Right": { angleX: 30 },
+        "Up": { angleY: 20 },
+        "Down": { angleY: -20 },
+        "Blink closed": { blink: 1 },
+        "Mouth open": { mouth: 1 },
+        "Smile": { smile: 1 },
+        "Frown": { smile: -1 },
+        "Squash": { squash: 1 },
+        "Stretch": { squash: -1 },
+        "Bounce max": { bounce: 1 }
+      };
+
+      function renderPresets() {
+        const container = document.getElementById("presets");
+        container.textContent = "";
+        for (const name of Object.keys(PRESETS)) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = name;
+          button.dataset.preset = name;
+          button.addEventListener("click", () => applyPreset(name));
+          container.append(button);
+        }
+      }
+
+      async function applyPreset(name) {
+        const targets = PRESETS[name];
         await enqueueMutation(async () => {
           try {
-            const result = await fetchJson("/api/control", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ id, value: valueToSend })
-            });
-            showValue(String(result.control.value));
-            setMessage(spec.label + " updated on runtime", true);
+            if (targets === null) {
+              await fetchJson("/api/reset", { method: "POST" });
+            } else {
+              for (const [id, value] of Object.entries(targets)) {
+                await fetchJson("/api/control", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ id, value })
+                });
+              }
+            }
             await refreshState();
+            setMessage("preset applied: " + name, true);
+            logEvent("ok", "preset applied: " + name);
           } catch (err) {
-            setMessage("control update failed: " + err.message, false);
-            await refreshState();
+            setMessage("preset failed: " + err.message, false);
+            logEvent("error", "preset failed: " + name + ": " + err.message);
           }
         });
       }
 
-      range.addEventListener("input", updateLocal);
-      range.addEventListener("change", commit);
-      number.addEventListener("input", updateLocal);
-      number.addEventListener("change", commit);
-      wrapper.append(label, range, number);
-      return wrapper;
-    }
+      // ---- renderer wiring (M3) ----
 
-    function renderControls(state) {
-      const container = document.getElementById("controls");
-      container.textContent = "";
-      const controlIds = Object.keys(state.semantic.schema);
-      for (const id of controlIds) {
-        const spec = state.semantic.schema[id];
-        if (!spec) {
-          throw new Error("missing control schema: " + id);
+      let modelInfo = null;
+      let renderer = null;
+      let latestControls = null;
+
+      function chooseRenderer() {
+        const canvas = document.getElementById("viewport");
+        const note = document.getElementById("viewport-note");
+        if (renderer) {
+          renderer.dispose();
+          renderer = null;
         }
-        container.append(controlElement(id, spec, state.semantic.controls[id]));
+        if (
+          modelInfo &&
+          modelInfo.model.kind === "cubism" &&
+          modelInfo.model.ready === true &&
+          modelInfo.sdk.available === true
+        ) {
+          try {
+            renderer = window.AvatarRenderers.create("cubism", {
+              canvas,
+              model: modelInfo.model,
+              manifest: modelInfo.manifest,
+              mapping: modelInfo.mapping,
+              sdk: modelInfo.sdk,
+              log: (text) => logEvent("model", text)
+            });
+            note.textContent =
+              "cubism renderer: model " + modelInfo.model.id +
+              " via official Cubism SDK for Web (licensed files, operator-installed).";
+            return;
+          } catch (err) {
+            note.textContent = "cubism renderer failed: " + err.message;
+            logEvent("error", "cubism renderer failed: " + err.message);
+          }
+        }
+        // Fail-closed fallback: deterministic placeholder, never a silent fake.
+        renderer = window.AvatarRenderers.create("placeholder", {
+          canvas,
+          log: (text) => logEvent("model", text)
+        });
+        if (modelInfo && modelInfo.model.kind === "cubism") {
+          note.textContent =
+            "placeholder renderer active — cubism model unavailable: " +
+            (modelInfo.model.error ? modelInfo.model.error.message : "SDK not installed");
+        } else {
+          note.textContent =
+            "placeholder renderer active — no licensed Cubism model configured " +
+            "(set AVATAR_MODEL_ID and add licensed SDK/model files).";
+        }
       }
-      setCheck("check-controls", controlIds.length === 8,
-        "semantic controls -> " + controlIds.length + " available");
-    }
 
-    async function refreshState() {
-      const state = await fetchJson("/api/state");
-      document.getElementById("state").textContent = JSON.stringify(state, null, 2);
-      renderControls(state);
-      setCheck("check-state",
-        state.model && state.model.kind === "placeholder" && state.semantic,
-        "GET /api/state -> semantic state reported (beats=" + state.semantic.events.beatCount + ")");
-      return state;
-    }
-
-    async function runChecks() {
-      const healthEl = document.getElementById("healthz");
-      healthEl.textContent = "(fetching…)";
-      document.getElementById("state").textContent = "(fetching…)";
-      try {
-        const health = await fetchJson("/healthz");
-        healthEl.textContent = JSON.stringify(health, null, 2);
-        setCheck("check-health",
-          health.status === "ok" && health.ready === true,
-          "GET /healthz -> " + health.status + " (ready=" + health.ready + ")");
-        await refreshState();
-        setMessage("runtime state loaded", true);
-      } catch (err) {
-        healthEl.textContent = "fetch failed: " + err.message;
-        document.getElementById("state").textContent = "fetch failed: " + err.message;
-        setCheck("check-health", false, "GET /healthz failed: " + err.message);
-        setCheck("check-state", false, "GET /api/state failed: " + err.message);
-        setCheck("check-controls", false, "semantic controls unavailable");
-        setMessage("runtime unavailable: " + err.message, false);
+      function renderModelStatus(state) {
+        const el = document.getElementById("model-status");
+        el.className = "note";
+        el.textContent = "";
+        const model = state.model;
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = "model: " + model.id + " (" + model.kind + ")";
+        el.append(chip);
+        if (model.error) {
+          const err = document.createElement("span");
+          err.className = "bad";
+          err.textContent = "error " + model.error.code + ": " + model.error.message;
+          el.append(err);
+          setCheck("check-model", false, "model unavailable: " + model.error.code);
+        } else if (model.kind === "cubism") {
+          const ready = document.createElement("span");
+          ready.className = model.ready ? "ok" : "bad";
+          ready.textContent = model.ready ? "ready (server-side)" : "not ready";
+          el.append(ready);
+          setCheck("check-model", model.ready, "model " + model.id + " ready");
+        } else {
+          setCheck("check-model", true, "placeholder model (no licensed model configured)");
+        }
       }
-    }
 
-    async function reset() {
-      await enqueueMutation(async () => {
-        try {
-          await fetchJson("/api/reset", { method: "POST" });
-          await refreshState();
-          setMessage("controls reset to defaults", true);
-        } catch (err) {
-          setMessage("reset failed: " + err.message, false);
+      function renderMappedParams(state) {
+        const tbody = document.querySelector("#mapped-params tbody");
+        tbody.textContent = "";
+        const note = document.getElementById("mapped-note");
+        let applied = {};
+        if (modelInfo && modelInfo.mapping && window.MeowcoreMapping) {
+          applied = window.MeowcoreMapping.applyMapping(modelInfo.mapping, state.semantic.controls);
         }
-      });
-    }
-
-    async function beat() {
-      await enqueueMutation(async () => {
-        try {
-          const result = await fetchJson("/api/beat", { method: "POST" });
-          await refreshState();
-          setMessage("beat event #" + result.event.beatCount + " recorded", true);
-        } catch (err) {
-          setMessage("beat failed: " + err.message, false);
+        const entries = window.MeowcoreMapping
+          ? window.MeowcoreMapping.parameterEntries(modelInfo && modelInfo.mapping ? modelInfo.mapping : {})
+          : [];
+        const values = Object.entries(applied);
+        if (values.length === 0) {
+          note.textContent = "no Cubism parameter mapping (placeholder mode — no licensed model configured).";
+          return;
         }
-      });
-    }
+        note.textContent = "read-only: computed from semantic controls via shared mapping module.";
+        const byParameter = Object.fromEntries(values);
+        for (const entry of entries) {
+          const value = byParameter[entry.parameter];
+          if (value === undefined) continue;
+          const tr = document.createElement("tr");
+          const semantic = document.createElement("td");
+          semantic.textContent = entry.semantic;
+          const parameter = document.createElement("td");
+          parameter.textContent = entry.parameter;
+          const number = document.createElement("td");
+          number.className = "num";
+          number.textContent = String(Math.round(value * 1000) / 1000);
+          tr.append(semantic, parameter, number);
+          tbody.append(tr);
+        }
+      }
 
-    document.getElementById("refresh").addEventListener("click", runChecks);
-    document.getElementById("reset").addEventListener("click", reset);
-    document.getElementById("beat").addEventListener("click", beat);
-    runChecks();
+      function renderEvents(state) {
+        document.getElementById("beat-count").textContent =
+          "beats: " + state.semantic.events.beatCount +
+          (state.semantic.events.lastBeatAt
+            ? " (last: " + new Date(state.semantic.events.lastBeatAt).toISOString() + ")"
+            : "");
+      }
+
+      function renderInspector(state) {
+        const el = document.getElementById("inspector-model");
+        el.className = "note";
+        el.textContent = "";
+        el.append("id=" + state.model.id + " kind=" + state.model.kind +
+          " loaded=" + state.model.loaded + " ready=" + state.model.ready);
+        renderModelStatus(state);
+        renderMappedParams(state);
+        renderEvents(state);
+      }
+
+      async function refreshState() {
+        const state = await fetchJson("/api/state");
+        document.getElementById("state").textContent = JSON.stringify(state, null, 2);
+        latestControls = { ...state.semantic.controls };
+        if (renderer) {
+          renderer.setControls(latestControls);
+        }
+        renderControls(state);
+        renderInspector(state);
+        setCheck("check-state",
+          state.model && state.semantic,
+          "GET /api/state -> state reported (beats=" + state.semantic.events.beatCount + ")");
+        return state;
+      }
+
+      async function runChecks() {
+        const healthEl = document.getElementById("healthz");
+        healthEl.textContent = "(fetching…)";
+        document.getElementById("state").textContent = "(fetching…)";
+        try {
+          modelInfo = await fetchJson("/api/model");
+          const health = await fetchJson("/healthz");
+          healthEl.textContent = JSON.stringify(health, null, 2);
+          setCheck("check-health",
+            health.status === "ok" && health.ready === true,
+            "GET /healthz -> " + health.status + " (ready=" + health.ready + ")");
+          const state = await refreshState();
+          document.getElementById("runtime-status").textContent =
+            "runtime ok · v" + state.version + " · service " + state.service;
+          chooseRenderer();
+          if (renderer) {
+            renderer.setControls(latestControls);
+            setCheck("check-viewport", true,
+              "viewport renderer: " + renderer.status().kind + " (" + renderer.status().state + ")");
+            window.__avatarRenderer = renderer;
+          }
+          setMessage("runtime state loaded", true);
+          logEvent("ok", "dashboard initialized: " + (modelInfo.model.id));
+        } catch (err) {
+          healthEl.textContent = "fetch failed: " + err.message;
+          document.getElementById("state").textContent = "fetch failed: " + err.message;
+          setCheck("check-health", false, "GET /healthz failed: " + err.message);
+          setCheck("check-state", false, "GET /api/state failed: " + err.message);
+          setCheck("check-controls", false, "semantic controls unavailable");
+          setCheck("check-model", false, "model state unavailable");
+          setCheck("check-viewport", false, "renderer unavailable");
+          setMessage("runtime unavailable: " + err.message, false);
+          logEvent("error", "runtime unavailable: " + err.message);
+        }
+      }
+
+      async function reset() {
+        await enqueueMutation(async () => {
+          try {
+            await fetchJson("/api/reset", { method: "POST" });
+            await refreshState();
+            setMessage("controls reset to defaults", true);
+            logEvent("ok", "controls reset to defaults");
+          } catch (err) {
+            setMessage("reset failed: " + err.message, false);
+            logEvent("error", "reset failed: " + err.message);
+          }
+        });
+      }
+
+      async function beat() {
+        await enqueueMutation(async () => {
+          try {
+            const result = await fetchJson("/api/beat", { method: "POST" });
+            await refreshState();
+            setMessage("beat event #" + result.event.beatCount + " recorded", true);
+            logEvent("beat", "beat event #" + result.event.beatCount + " recorded");
+          } catch (err) {
+            setMessage("beat failed: " + err.message, false);
+            logEvent("error", "beat failed: " + err.message);
+          }
+        });
+      }
+
+      const viewport = document.getElementById("viewport");
+      if (typeof ResizeObserver === "function") {
+        const observer = new ResizeObserver(() => {
+          if (renderer) {
+            renderer.resize();
+          }
+        });
+        observer.observe(viewport);
+      }
+
+      document.getElementById("refresh").addEventListener("click", runChecks);
+      document.getElementById("reset").addEventListener("click", reset);
+      document.getElementById("beat").addEventListener("click", beat);
+      renderPresets();
+      runChecks();
+    })();
   </script>
 </body>
 </html>

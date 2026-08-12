@@ -31,3 +31,8 @@ Thumbs.db
 # Explicitly local/private asset staging
 models/private/
 assets/private/
+
+# Licensed/private web assets (M3): the official Cubism SDK for Web files
+# are operator-installed, never committed. The renderer only activates when
+# these files exist and a licensed model manifest is configured.
+runtime/public/vendor/

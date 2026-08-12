@@ -11,5 +11,5 @@
     "types": ["node"],
     "skipLibCheck": true
   },
-  "include": ["server/**/*.js", "test/**/*.js", "smoke/**/*.js"]
+  "include": ["server/**/*.js", "shared/**/*.js", "test/**/*.js", "smoke/**/*.js", "public/live2d/**/*.js"]
 }

@@ -13,13 +13,21 @@ const path = require('node:path');
 
 const { loadConfig } = require('./config');
 const { createHandler } = require('./app');
+const { createModelRegistry } = require('./model');
 const { createState } = require('./state');
 
 const config = loadConfig();
-const state = createState();
 const publicDir = path.join(__dirname, '..', 'public');
+const modelRegistry = createModelRegistry({
+  modelsDir: config.modelsDir,
+  publicDir,
+  modelId: config.modelId || '',
+});
+const state = createState(modelRegistry.model);
 
-const server = http.createServer(createHandler({ config, state, publicDir }));
+const server = http.createServer(
+  createHandler({ config, state, publicDir, modelRegistry })
+);
 
 server.listen(config.port, config.bind, () => {
   console.log(

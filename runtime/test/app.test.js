@@ -6,8 +6,14 @@ const http = require('node:http');
 const path = require('node:path');
 
 const { createHandler, healthBody, stateBody } = require('../server/app');
+const { createModelRegistry } = require('../server/model');
 const { createState } = require('../server/state');
 const { loadConfig } = require('../server/config');
+const {
+  createModelFixture,
+  createSdkStub,
+  removeFixture,
+} = require('./fixtures');
 
 const publicDir = path.join(__dirname, '..', 'public');
 const config = loadConfig({});
@@ -16,6 +22,23 @@ const config = loadConfig({});
 // between tests.
 function handlerFor() {
   return createHandler({ config, state: createState(), publicDir });
+}
+
+// Cubism-configured handler with a disposable fixture model.
+function cubismHandlerFor(options = {}) {
+  const fixture = options.fixture || createModelFixture();
+  const registry = createModelRegistry({
+    modelsDir: fixture.modelsDir,
+    publicDir,
+    modelId: fixture.modelId,
+  });
+  const handler = createHandler({
+    config,
+    state: createState(registry.model),
+    publicDir,
+    modelRegistry: registry,
+  });
+  return { handler, registry, fixture };
 }
 
 function request(handler, method, urlPath, body) {
@@ -133,11 +156,13 @@ test('GET / returns the clean output page', async () => {
   assert.match(res.body, /No Live2D model loaded/);
 });
 
-test('GET /debug returns the validation surface', async () => {
+test('GET /debug returns the M3 visual dashboard', async () => {
   const res = await request(handlerFor(), 'GET', '/debug');
   assert.equal(res.status, 200);
   assert.match(res.contentType, /text\/html/);
-  assert.match(res.body, /debug \/ validation surface/);
+  assert.match(res.body, /visual dashboard/);
+  assert.match(res.body, /viewport/);
+  assert.match(res.body, /MeowcoreMapping/);
 });
 
 test('GET /api/state reports placeholder runtime state', async () => {
@@ -289,4 +314,110 @@ test('healthBody/stateBody keep placeholder contract fields', () => {
   const s = stateBody(config, state);
   assert.equal(s.counters.requests, 0);
   assert.equal(s.service, 'avatar-runtime');
+});
+
+// ---------------------------------------------------------------------
+// M3: model contract routes (read-only; no mutation surface)
+// ---------------------------------------------------------------------
+
+test('GET /api/model reports the placeholder registry without a manifest', async () => {
+  const res = await request(handlerFor(), 'GET', '/api/model');
+  assert.equal(res.status, 200);
+  const body = JSON.parse(res.body);
+  assert.equal(body.model.id, 'placeholder-none');
+  assert.equal(body.model.kind, 'placeholder');
+  assert.equal(body.manifest, null);
+  assert.equal(body.mapping, null);
+  assert.equal(typeof body.sdk.available, 'boolean');
+  assert.equal(body.sdk.basePath, '/vendor/live2d/');
+});
+
+test('GET /api/model serves the configured cubism manifest read-only', async () => {
+  const { handler, registry, fixture } = cubismHandlerFor();
+  const res = await request(handler, 'GET', '/api/model');
+  assert.equal(res.status, 200);
+  const body = JSON.parse(res.body);
+  assert.deepEqual(body.model, registry.model);
+  assert.equal(body.manifest.modelId, fixture.modelId);
+  assert.equal(body.manifest.kind, 'cubism');
+  assert.equal(body.mapping.angleX[0].parameter, 'ParamAngleX');
+  assert.equal(body.sdk.available, false);
+  removeFixture(fixture.root);
+});
+
+test('GET /api/state reports mapped Cubism parameters (read-only) for cubism models', async () => {
+  const { handler, fixture } = cubismHandlerFor();
+  const state = JSON.parse((await request(handler, 'GET', '/api/state')).body);
+  assert.equal(state.model.kind, 'cubism');
+  assert.equal(state.model.loaded, true);
+  assert.equal(state.model.ready, true);
+  // defaults: eyes open (blink 0 -> ParamEyeLOpen 1)
+  assert.equal(state.mapped.ParamEyeLOpen, 1);
+  assert.equal(state.mapped.ParamEyeROpen, 1);
+  assert.equal(state.mapped.ParamAngleX, 0);
+
+  await request(handler, 'POST', '/api/control', { id: 'blink', value: 1 });
+  await request(handler, 'POST', '/api/control', { id: 'angleX', value: 999 });
+  const updated = JSON.parse((await request(handler, 'GET', '/api/state')).body);
+  assert.equal(updated.mapped.ParamEyeLOpen, 0, 'blink closed maps to eye open 0');
+  assert.equal(updated.mapped.ParamAngleX, 30, 'mapped values are clamped to manifest bounds');
+  removeFixture(fixture.root);
+});
+
+test('placeholder state keeps mapped as an empty object', async () => {
+  const res = await request(handlerFor(), 'GET', '/api/state');
+  const body = JSON.parse(res.body);
+  assert.deepEqual(body.mapped, {});
+});
+
+test('GET /models/<id>/ serves only the configured model directory', async () => {
+  const { handler, fixture } = cubismHandlerFor();
+  const manifestRes = await request(handler, 'GET', '/models/fixture-model/manifest.json');
+  assert.equal(manifestRes.status, 200);
+  assert.match(manifestRes.contentType, /application\/json/);
+  assert.equal(JSON.parse(manifestRes.body).modelId, 'fixture-model');
+
+  const model3Res = await request(handler, 'GET', '/models/fixture-model/fixture.model3.json');
+  assert.equal(model3Res.status, 200);
+  assert.match(model3Res.contentType, /application\/json/);
+
+  for (const p of [
+    '/models/fixture-model/../server.js',
+    '/models/fixture-model/..%2F..%2Fpackage.json',
+    '/models/other-model/manifest.json',
+    '/models/fixture-model/nope.moc3',
+    '/models/',
+    '/models',
+  ]) {
+    const res = await request(handler, 'GET', p);
+    assert.equal(res.status, 404, p);
+  }
+  removeFixture(fixture.root);
+});
+
+test('model assets are never served while the registry is the placeholder', async () => {
+  const res = await request(handlerFor(), 'GET', '/models/anything/manifest.json');
+  assert.equal(res.status, 404);
+});
+
+test('GET /js/mapping.js serves the shared mapping module as JavaScript', async () => {
+  const res = await request(handlerFor(), 'GET', '/js/mapping.js');
+  assert.equal(res.status, 200);
+  assert.match(res.contentType, /text\/javascript/);
+  assert.match(res.body, /MeowcoreMapping/);
+  assert.match(res.body, /applyMapping/);
+});
+
+test('GET /live2d/renderer.js serves the renderer adapter as a public asset', async () => {
+  const res = await request(handlerFor(), 'GET', '/live2d/renderer.js');
+  assert.equal(res.status, 200);
+  assert.match(res.contentType, /text\/javascript/);
+  assert.match(res.body, /AvatarRenderers/);
+});
+
+test('non-GET methods on M3 read-only routes are not served', async () => {
+  const res = await request(handlerFor(), 'POST', '/api/model');
+  assert.equal(res.status, 404);
+  const res2 = await request(handlerFor(), 'POST', '/js/mapping.js');
+  assert.equal(res2.status, 404);
 });
