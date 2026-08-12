@@ -1,4 +1,4 @@
-# Avatar Runtime (PR-001 bootstrap)
+# Avatar Runtime (PR-001 bootstrap + M2 semantic controls)
 
 Host-served Meowcore Avatar Runtime skeleton. Ubuntu-host Docker service;
 Hermes and H4V3-DJ are HTTP/WebSocket clients (see `docs/ARCHITECTURE.md`).
@@ -24,7 +24,7 @@ Requirements from `.agent/pr-requests/PR-001-avatar-runtime-bootstrap.md`:
 Using only the Node.js standard library (`node:http`, `node:test`) keeps the
 runtime dependency-free: no supply-chain surface, tiny image, reproducible
 anywhere with Node >= 20. A framework (Express/Fastify) adds nothing for the
-current four routes.
+current bounded M2 HTTP surface.
 
 Rejected: bundling a Live2D SDK now (no licensed model asset yet, no
 semantics to implement — would be a fake endpoint); Python/FastAPI (fine
@@ -44,6 +44,7 @@ runtime/
     debug.html   validation surface (/debug)
   test/
     app.test.js      route/contract tests (node:test)
+    state.test.js    semantic defaults/range/event tests
     config.test.js   env config tests
     compose.test.js  compose bind-contract tests (AVATAR_HOST_BIND etc.)
     public.test.js   public-surface XSS guard (no innerHTML)
@@ -77,18 +78,48 @@ In the compose path (`compose.yaml`) the container-internal listen is fixed to
 is not the exposure control. Exposure is governed by `AVATAR_HOST_BIND` on the
 host side only; the default remains loopback-only per `docs/SECURITY.md`.
 
-## HTTP surface (PR-001, actual semantics only)
+## HTTP surface (M2 semantic controls)
 
 ```text
 GET /healthz   machine-readable readiness JSON (status/ready/version/model)
-GET /api/state real runtime state (placeholder model, counters)
+GET /api/state runtime state (placeholder model, semantic controls, events, counters)
+POST /api/control {"id":"<semantic id>","value":<number>} (bounded/clamped)
+POST /api/reset  empty body; reset all semantic controls to defaults
+POST /api/beat   empty body; record one discrete beat event
 GET /          clean avatar output surface
-GET /debug     validation surface (runs health + state checks in-page)
+GET /debug     deterministic semantic control and state validation surface
 ```
+
+The server owns the semantic state. The public ids are deliberately not
+Cubism/ArtMesh ids:
+
+| ID | Default | Min | Max | Unit | Meaning at min / default / max |
+|---|---:|---:|---:|---|---|
+| `angleX` | 0 | -30 | 30 | degrees | avatar turns toward its left / faces forward / avatar turns toward its right |
+| `angleY` | 0 | -20 | 20 | degrees | looks down / looks level / looks up |
+| `bodyX` | 0 | -1 | 1 | normalized | body moves toward avatar's left / body is centered / body moves toward avatar's right |
+| `blink` | 0 | 0 | 1 | normalized | eyes open / eyes open / eyes fully closed |
+| `mouth` | 0 | 0 | 1 | normalized | mouth closed / mouth closed / mouth fully open |
+| `smile` | 0 | -1 | 1 | normalized | frown / neutral / smile |
+| `squash` | 0 | -1 | 1 | normalized | vertical stretch / neutral / vertical squash |
+| `bounce` | 0 | 0 | 1 | normalized | neutral / neutral / maximum debug bounce amplitude |
+
+The meaning column is also published as `semantic.schema.<id>.meaning` in
+`GET /api/state` with explicit `min`, `default`, and `max` fields. A future M3
+adapter must consume those semantic meanings without inferring direction from
+Cubism parameter conventions; Cubism-specific ids remain internal to that
+adapter.
+
+Numeric values outside these ranges are clamped. Unknown ids, non-finite
+values, malformed JSON, extra request fields, and oversized bodies are
+rejected with a bounded `400` response. `beat` is discrete: it increments
+`semantic.events.beatCount` and records `lastBeatAt`; it does not add a
+persistent continuous control.
 
 Deliberately **not** implemented yet: reload/expression/motion/parameter
 endpoints and `/ws/events`. They will appear only together with real model
-loader/controller semantics (no fake endpoints).
+loader/controller semantics (no fake endpoints). M3 should add only a
+renderer/model adapter from these semantic ids to Cubism parameters.
 
 ## Run / test / smoke
 

@@ -3,9 +3,12 @@
 /**
  * HTTP request handler for the Avatar Runtime.
  *
- * PR-001 surface (actual semantics only, no fake endpoints):
+ * M2 surface (actual semantics only, no fake endpoints):
  *   GET /healthz   machine-readable service readiness
- *   GET /api/state real runtime state (placeholder model)
+ *   GET /api/state real runtime state (placeholder model + semantic controls)
+ *   POST /api/control bounded semantic control update
+ *   POST /api/reset reset semantic controls to defaults
+ *   POST /api/beat trigger a bounded beat event
  *   GET /          clean avatar output surface
  *   GET /debug     validation/test surface
  *
@@ -15,6 +18,15 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+
+const {
+  resetControls,
+  semanticState,
+  triggerBeat,
+  updateControl,
+} = require('./state');
+
+const MAX_JSON_BODY_BYTES = 16 * 1024;
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -63,8 +75,241 @@ function stateBody(config, state) {
       kind: state.model.kind,
     },
     parameters: state.parameters,
+    semantic: semanticState(state),
     counters: state.counters,
   };
+}
+
+function requestError(code, message) {
+  const error = /** @type {Error & { code: string }} */ (new Error(message));
+  error.code = code;
+  return error;
+}
+
+function assertJsonHasNoDuplicateKeys(raw) {
+  let index = 0;
+
+  function skipWhitespace() {
+    while (index < raw.length && /\s/.test(raw[index])) {
+      index += 1;
+    }
+  }
+
+  function parseString() {
+    if (raw[index] !== '"') {
+      throw new Error('expected JSON string');
+    }
+    const start = index;
+    index += 1;
+    while (index < raw.length) {
+      const character = raw[index];
+      index += 1;
+      if (character === '\\') {
+        if (index >= raw.length) {
+          throw new Error('unterminated escape');
+        }
+        index += 1;
+      } else if (character === '"') {
+        try {
+          return JSON.parse(raw.slice(start, index));
+        } catch {
+          throw new Error('invalid JSON string');
+        }
+      } else if (character.charCodeAt(0) < 0x20) {
+        throw new Error('unescaped control character');
+      }
+    }
+    throw new Error('unterminated JSON string');
+  }
+
+  function parseValue() {
+    skipWhitespace();
+    const character = raw[index];
+    if (character === '"') {
+      parseString();
+      return;
+    }
+    if (character === '{') {
+      parseObject();
+      return;
+    }
+    if (character === '[') {
+      parseArray();
+      return;
+    }
+    for (const literal of ['true', 'false', 'null']) {
+      if (raw.startsWith(literal, index)) {
+        index += literal.length;
+        return;
+      }
+    }
+    const number = raw.slice(index).match(
+      /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/
+    );
+    if (number) {
+      index += number[0].length;
+      return;
+    }
+    throw new Error('invalid JSON value');
+  }
+
+  function parseObject() {
+    index += 1;
+    skipWhitespace();
+    const keys = new Set();
+    if (raw[index] === '}') {
+      index += 1;
+      return;
+    }
+    while (index < raw.length) {
+      skipWhitespace();
+      const key = parseString();
+      if (keys.has(key)) {
+        throw requestError('duplicate_key', 'duplicate JSON object key');
+      }
+      keys.add(key);
+      skipWhitespace();
+      if (raw[index] !== ':') {
+        throw new Error('expected JSON object colon');
+      }
+      index += 1;
+      parseValue();
+      skipWhitespace();
+      if (raw[index] === '}') {
+        index += 1;
+        return;
+      }
+      if (raw[index] !== ',') {
+        throw new Error('expected JSON object separator');
+      }
+      index += 1;
+    }
+    throw new Error('unterminated JSON object');
+  }
+
+  function parseArray() {
+    index += 1;
+    skipWhitespace();
+    if (raw[index] === ']') {
+      index += 1;
+      return;
+    }
+    while (index < raw.length) {
+      parseValue();
+      skipWhitespace();
+      if (raw[index] === ']') {
+        index += 1;
+        return;
+      }
+      if (raw[index] !== ',') {
+        throw new Error('expected JSON array separator');
+      }
+      index += 1;
+    }
+    throw new Error('unterminated JSON array');
+  }
+
+  skipWhitespace();
+  parseValue();
+  skipWhitespace();
+  if (index !== raw.length) {
+    throw new Error('trailing JSON data');
+  }
+}
+
+function parseJsonBody(raw) {
+  try {
+    assertJsonHasNoDuplicateKeys(raw);
+    return JSON.parse(raw);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'duplicate_key') {
+      throw error;
+    }
+    throw requestError('invalid_json', 'request body must be valid JSON');
+  }
+}
+
+function readJsonBody(req, { optional = false } = {}) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let settled = false;
+
+    function fail(error) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      req.resume();
+      reject(error);
+    }
+
+    req.on('data', (chunk) => {
+      if (settled) {
+        return;
+      }
+      size += Buffer.byteLength(chunk);
+      if (size > MAX_JSON_BODY_BYTES) {
+        fail(requestError('body_too_large', 'request body is too large'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('error', (error) => fail(error));
+    req.on('end', () => {
+      if (settled) {
+        return;
+      }
+      const raw = Buffer.concat(chunks).toString('utf8').trim();
+      if (!raw) {
+        if (optional) {
+          settled = true;
+          resolve({});
+        } else {
+          fail(requestError('missing_body', 'JSON request body is required'));
+        }
+        return;
+      }
+      let value;
+      try {
+        value = parseJsonBody(raw);
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        fail(requestError('invalid_body', 'request body must be a JSON object'));
+        return;
+      }
+      settled = true;
+      resolve(value);
+    });
+  });
+}
+
+function sendRequestError(res, error) {
+  const messages = {
+    body_too_large: 'request body is too large',
+    invalid_json: 'request body must be valid JSON',
+    duplicate_key: 'request body must not contain duplicate object keys',
+    invalid_body: 'request body must be a JSON object or empty',
+    missing_body: 'JSON request body is required',
+    unknown_control: 'unknown semantic control id',
+    invalid_value: 'control value must be a finite number',
+    invalid_control_request:
+      'control request must contain only string id and numeric value',
+  };
+  const code = Object.prototype.hasOwnProperty.call(messages, error.code)
+    ? error.code
+    : 'invalid_request';
+  const message = messages[code] || 'request could not be accepted';
+  sendJson(res, 400, { error: 'bad request', code, message });
+}
+
+function requireEmptyBody(body) {
+  if (Object.keys(body).length !== 0) {
+    throw requestError('invalid_body', 'request body must be empty');
+  }
 }
 
 /**
@@ -98,7 +343,7 @@ function serveStatic(res, publicDir, routePath) {
 }
 
 function createHandler({ config, state, publicDir }) {
-  return function handler(req, res) {
+  return async function handler(req, res) {
     let url;
     try {
       url = new URL(req.url, 'http://localhost');
@@ -116,6 +361,65 @@ function createHandler({ config, state, publicDir }) {
     }
     if (req.method === 'GET' && pathname === '/api/state') {
       sendJson(res, 200, stateBody(config, state));
+      return;
+    }
+    if (req.method === 'POST' && pathname === '/api/control') {
+      let body;
+      try {
+        body = await readJsonBody(req);
+      } catch (error) {
+        sendRequestError(res, error);
+        return;
+      }
+      const keys = Object.keys(body);
+      if (
+        keys.length !== 2 ||
+        !Object.prototype.hasOwnProperty.call(body, 'id') ||
+        !Object.prototype.hasOwnProperty.call(body, 'value') ||
+        typeof body.id !== 'string'
+      ) {
+        sendRequestError(
+          res,
+          requestError(
+            'invalid_control_request',
+            'control request must contain only string id and numeric value'
+          )
+        );
+        return;
+      }
+      const result = updateControl(state, body.id, body.value);
+      if (!result.ok) {
+        sendRequestError(res, requestError(result.code, result.code));
+        return;
+      }
+      sendJson(res, 200, { ok: true, control: result, semantic: semanticState(state) });
+      return;
+    }
+    if (req.method === 'POST' && pathname === '/api/reset') {
+      try {
+        const body = await readJsonBody(req, { optional: true });
+        requireEmptyBody(body);
+      } catch (error) {
+        sendRequestError(res, error);
+        return;
+      }
+      sendJson(res, 200, { ok: true, semantic: resetControls(state) });
+      return;
+    }
+    if (req.method === 'POST' && pathname === '/api/beat') {
+      try {
+        const body = await readJsonBody(req, { optional: true });
+        requireEmptyBody(body);
+      } catch (error) {
+        sendRequestError(res, error);
+        return;
+      }
+      const event = triggerBeat(state);
+      sendJson(res, 200, {
+        ok: true,
+        event: { type: 'beat', ...event },
+        semantic: semanticState(state),
+      });
       return;
     }
     if (req.method === 'GET' && (pathname === '/' || pathname === '/debug')) {

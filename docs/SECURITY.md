@@ -46,10 +46,15 @@ Allowed API concepts should be semantic and bounded, for example:
 - state/health
 - known model reload
 - named expression/motion
-- validated parameter ID + bounded numeric value
+- validated semantic control ID + bounded numeric value
 - structured beat/speech/DJ events
 
 Do not create generic endpoints that execute arbitrary shell commands, arbitrary Docker operations, arbitrary local paths, or uploaded executable content.
+
+The M2 debug surface uses only the allowlisted semantic ids published by
+`GET /api/state`; it does not accept raw Cubism/ArtMesh ids. Unknown ids,
+non-finite values, malformed JSON, extra fields, and oversized mutation bodies
+fail closed with a bounded client error.
 
 ## Secrets
 

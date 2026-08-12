@@ -42,18 +42,48 @@
     .ok { color: var(--good); }
     .bad { color: var(--bad); }
     .note { color: var(--muted); }
+    .controls {
+      display: grid;
+      gap: 0.65rem;
+      max-width: 42rem;
+    }
+    .control {
+      display: grid;
+      grid-template-columns: minmax(8rem, 1fr) minmax(12rem, 2fr) 5rem;
+      gap: 0.75rem;
+      align-items: center;
+      background: #fff;
+      border: 1px solid #d8d8cc;
+      padding: 0.55rem 0.7rem;
+    }
+    .control output { text-align: right; }
+    input[type="range"] { width: 100%; }
+    input[type="number"] { width: 100%; font: inherit; }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+    #message { min-height: 1.55em; }
   </style>
 </head>
 <body>
   <h1>Avatar Runtime — debug / validation surface</h1>
-  <p class="note">PR-001 placeholder: no real Live2D model is loaded. This page
-    verifies the host-served runtime boundary (health + state), not art quality.</p>
+  <p class="note">M2 semantic control surface: the server owns state; no real
+    Live2D model is loaded. This page verifies control semantics, not art quality.</p>
+
+  <h2>Semantic controls</h2>
+  <div id="controls" class="controls" aria-live="polite">
+    <p id="controls-loading" class="note">loading control contract…</p>
+  </div>
+  <div class="actions">
+    <button id="reset" type="button">reset defaults</button>
+    <button id="beat" type="button">trigger beat</button>
+    <button id="refresh" type="button">refresh state</button>
+  </div>
+  <p id="message" class="note" role="status">pending…</p>
 
   <h2>Checks</h2>
-  <button id="refresh" type="button">re-run checks</button>
   <ul id="checks">
     <li id="check-health" class="note">pending…</li>
     <li id="check-state" class="note">pending…</li>
+    <li id="check-controls" class="note">pending…</li>
   </ul>
 
   <h2>/healthz</h2>
@@ -65,10 +95,18 @@
   <p><a href="/">back to avatar output</a></p>
 
   <script>
-    async function fetchJson(path) {
-      const res = await fetch(path);
-      if (!res.ok) throw new Error(path + " -> HTTP " + res.status);
-      return res.json();
+    async function fetchJson(path, options) {
+      const res = await fetch(path, options);
+      let body;
+      try {
+        body = await res.json();
+      } catch {
+        throw new Error(path + " -> invalid JSON response");
+      }
+      if (!res.ok) {
+        throw new Error((body.code || "request_failed") + ": " + (body.message || res.status));
+      }
+      return body;
     }
 
     function setCheck(id, ok, text) {
@@ -77,34 +115,161 @@
       el.textContent = text;
     }
 
+    function setMessage(text, ok) {
+      const el = document.getElementById("message");
+      el.className = ok ? "ok" : "bad";
+      el.textContent = text;
+    }
+
+    let mutationQueue = Promise.resolve();
+
+    function enqueueMutation(task) {
+      mutationQueue = mutationQueue.catch(() => {}).then(task);
+      return mutationQueue;
+    }
+
+    function controlElement(id, spec, value) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "control";
+      wrapper.id = "control-" + id;
+
+      const label = document.createElement("label");
+      label.htmlFor = "range-" + id;
+      label.textContent = spec.label + " (" + spec.unit + ")";
+
+      const range = document.createElement("input");
+      range.id = "range-" + id;
+      range.type = "range";
+      range.min = String(spec.min);
+      range.max = String(spec.max);
+      range.step = String(spec.step);
+      range.value = String(value);
+      range.setAttribute("aria-label", spec.label);
+
+      const number = document.createElement("input");
+      number.id = "value-" + id;
+      number.type = "number";
+      number.min = String(spec.min);
+      number.max = String(spec.max);
+      number.step = String(spec.step);
+      number.value = String(value);
+      number.setAttribute("aria-label", spec.label + " numeric value");
+
+      function showValue(next) {
+        range.value = next;
+        number.value = next;
+      }
+
+      function updateLocal(event) {
+        showValue(event.target.value);
+      }
+
+      async function commit(event) {
+        const valueToSend = Number(event.target.value);
+        if (!Number.isFinite(valueToSend)) {
+          setMessage(spec.label + ": enter a finite number", false);
+          showValue(String(value));
+          return;
+        }
+        await enqueueMutation(async () => {
+          try {
+            const result = await fetchJson("/api/control", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ id, value: valueToSend })
+            });
+            showValue(String(result.control.value));
+            setMessage(spec.label + " updated on runtime", true);
+            await refreshState();
+          } catch (err) {
+            setMessage("control update failed: " + err.message, false);
+            await refreshState();
+          }
+        });
+      }
+
+      range.addEventListener("input", updateLocal);
+      range.addEventListener("change", commit);
+      number.addEventListener("input", updateLocal);
+      number.addEventListener("change", commit);
+      wrapper.append(label, range, number);
+      return wrapper;
+    }
+
+    function renderControls(state) {
+      const container = document.getElementById("controls");
+      container.textContent = "";
+      const controlIds = Object.keys(state.semantic.schema);
+      for (const id of controlIds) {
+        const spec = state.semantic.schema[id];
+        if (!spec) {
+          throw new Error("missing control schema: " + id);
+        }
+        container.append(controlElement(id, spec, state.semantic.controls[id]));
+      }
+      setCheck("check-controls", controlIds.length === 8,
+        "semantic controls -> " + controlIds.length + " available");
+    }
+
+    async function refreshState() {
+      const state = await fetchJson("/api/state");
+      document.getElementById("state").textContent = JSON.stringify(state, null, 2);
+      renderControls(state);
+      setCheck("check-state",
+        state.model && state.model.kind === "placeholder" && state.semantic,
+        "GET /api/state -> semantic state reported (beats=" + state.semantic.events.beatCount + ")");
+      return state;
+    }
+
     async function runChecks() {
       const healthEl = document.getElementById("healthz");
-      const stateEl = document.getElementById("state");
       healthEl.textContent = "(fetching…)";
-      stateEl.textContent = "(fetching…)";
+      document.getElementById("state").textContent = "(fetching…)";
       try {
         const health = await fetchJson("/healthz");
         healthEl.textContent = JSON.stringify(health, null, 2);
         setCheck("check-health",
           health.status === "ok" && health.ready === true,
           "GET /healthz -> " + health.status + " (ready=" + health.ready + ")");
+        await refreshState();
+        setMessage("runtime state loaded", true);
       } catch (err) {
         healthEl.textContent = "fetch failed: " + err.message;
+        document.getElementById("state").textContent = "fetch failed: " + err.message;
         setCheck("check-health", false, "GET /healthz failed: " + err.message);
-      }
-      try {
-        const state = await fetchJson("/api/state");
-        stateEl.textContent = JSON.stringify(state, null, 2);
-        setCheck("check-state",
-          state.model && state.model.kind === "placeholder",
-          "GET /api/state -> placeholder model reported");
-      } catch (err) {
-        stateEl.textContent = "fetch failed: " + err.message;
         setCheck("check-state", false, "GET /api/state failed: " + err.message);
+        setCheck("check-controls", false, "semantic controls unavailable");
+        setMessage("runtime unavailable: " + err.message, false);
       }
     }
 
+    async function reset() {
+      await enqueueMutation(async () => {
+        try {
+          await fetchJson("/api/reset", { method: "POST" });
+          await refreshState();
+          setMessage("controls reset to defaults", true);
+        } catch (err) {
+          setMessage("reset failed: " + err.message, false);
+        }
+      });
+    }
+
+    async function beat() {
+      await enqueueMutation(async () => {
+        try {
+          const result = await fetchJson("/api/beat", { method: "POST" });
+          await refreshState();
+          setMessage("beat event #" + result.event.beatCount + " recorded", true);
+        } catch (err) {
+          setMessage("beat failed: " + err.message, false);
+        }
+      });
+    }
+
     document.getElementById("refresh").addEventListener("click", runChecks);
+    document.getElementById("reset").addEventListener("click", reset);
+    document.getElementById("beat").addEventListener("click", beat);
     runChecks();
   </script>
 </body>
