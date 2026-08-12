@@ -88,15 +88,19 @@ It does **not** own:
 - Runtime implementation: [`runtime/README.md`](runtime/README.md)
 - Agentic PR request template: [`.agent/PR_REQUEST_TEMPLATE.md`](.agent/PR_REQUEST_TEMPLATE.md)
 
-## Implemented runtime surface (PR-001)
+## Implemented runtime surface (M2)
 
-The bootstrap runtime ships a deterministic placeholder (no Live2D model):
+The runtime ships a deterministic placeholder plus a server-owned semantic
+control surface (no Live2D model):
 
 ```text
 GET /healthz   machine-readable readiness JSON
-GET /api/state real runtime state (placeholder model)
+GET /api/state runtime state (placeholder model + semantic controls/events)
+POST /api/control bounded semantic control update
+POST /api/reset reset semantic controls to defaults
+POST /api/beat  bounded discrete beat trigger
 GET /          clean avatar output surface
-GET /debug     validation surface
+GET /debug     semantic control/state validation surface
 ```
 
 - Docker service: `compose.yaml` (host bind `AVATAR_HOST_BIND`, loopback-only by default)
@@ -105,9 +109,9 @@ GET /debug     validation surface
 
 Full commands and validation instructions: `runtime/README.md`.
 
-## Planned runtime surface
+## Future runtime surface
 
-The exact API is not frozen yet, but the initial direction is:
+The following remain future work and are deliberately not fake endpoints:
 
 ```text
 GET  /healthz
@@ -119,7 +123,7 @@ POST /api/parameter
 WS   /ws/events
 
 /                 avatar output
-/debug            parameter controls
+/debug            semantic control/state test surface
 /expressions      expression QA
 /motion           motion QA
 /outline-test     deformation / outline torture test

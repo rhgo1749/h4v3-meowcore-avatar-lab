@@ -108,15 +108,19 @@ Owns GUI-only and aesthetic operations:
 
 The exported artifact becomes the runtime input. Hermes is expected to reproduce and validate the post-export pipeline, not the Cubism GUI editing session.
 
-## Implemented interface (PR-001)
+## Implemented interface (M2)
 
-Bootstrap runtime with a deterministic placeholder (no Live2D model yet):
+Runtime with a deterministic placeholder and server-owned semantic controls
+(no Live2D model yet):
 
 ```text
 GET /healthz   machine-readable readiness JSON (status/ready/version/model)
-GET /api/state real runtime state (placeholder model, counters)
+GET /api/state runtime state (placeholder model, semantic state, counters)
+POST /api/control { id, value } bounded semantic control update
+POST /api/reset  reset semantic controls to defaults
+POST /api/beat   record one discrete beat event
 GET /          clean avatar output surface
-GET /debug     validation surface
+GET /debug     semantic control/state validation surface
 ```
 
 Implementation lives in `runtime/` (Node.js, zero runtime dependencies),
@@ -126,11 +130,10 @@ publish bind, default `127.0.0.1`, loopback-only; `0.0.0.0` is explicit
 opt-in external exposure) and `AVATAR_PORT` (default `8930`, invalid values
 fail fast). See `runtime/README.md` for commands and validation.
 
-## Planned interface
+## Future interface
 
-This is a direction, not yet a frozen production API. PR-001 deliberately
-implements only the endpoints above; the following appear together with
-real model/controller semantics, never as fake stubs:
+The following appear together with real model/controller semantics, never as
+fake stubs:
 
 ```text
 POST /api/reload
@@ -144,7 +147,7 @@ Potential browser surfaces:
 
 ```text
 /                 clean avatar output
-/debug            raw parameter controls
+/debug            semantic control/state test surface
 /expressions      expression matrix
 /motion           motion test harness
 /outline-test     deformation torture test
@@ -153,7 +156,26 @@ Potential browser surfaces:
 
 ## State model principle
 
-The service is stateful. Unlike a request/response text provider, avatar state persists across events. APIs should therefore define ownership, bounded parameter ranges and transition semantics rather than expose arbitrary low-level commands.
+The service is stateful. Unlike a request/response text provider, avatar state
+persists across events. The runtime owns the current semantic control state;
+clients such as `/debug`, Hermes, and H4V3-DJ only issue bounded semantic
+requests. The public layer must not expose raw ArtMesh or Cubism parameter
+ids.
+
+The M2 placeholder contract is:
+
+```text
+GET  /api/state
+POST /api/control  { id, value }
+POST /api/reset    empty body
+POST /api/beat     empty body
+```
+
+Continuous controls are defined in one server-side schema with defaults and
+min/max clamping. `beat` is a discrete event observed through a counter and
+timestamp in `/api/state`; it is not a persistent continuous parameter. M3
+may add a renderer/model adapter behind this contract without changing its
+semantic ownership boundary.
 
 ## Lifecycle principle
 

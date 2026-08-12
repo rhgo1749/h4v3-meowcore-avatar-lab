@@ -1,7 +1,7 @@
 {
   "name": "meowcore-avatar-runtime",
   "version": "0.1.0",
-  "description": "Host-served Meowcore Avatar Runtime (PR-001 bootstrap skeleton)",
+  "description": "Host-served Meowcore Avatar Runtime (M2 semantic control surface)",
   "private": true,
   "license": "UNLICENSED",
   "type": "commonjs",
