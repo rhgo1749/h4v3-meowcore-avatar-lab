@@ -203,6 +203,8 @@ test('sdkStatus detects official SDK files under public/vendor/live2d/', () => {
   assert.equal(missing.available, false);
   assert.equal(missing.basePath, '/vendor/live2d/');
   assert.equal(missing.shaderPath, '/vendor/live2d/shaders/WebGL/');
+  assert.ok(missing.missingFiles.includes('live2dcubismcore.min.js'));
+  assert.ok(missing.missingFiles.includes('shaders/WebGL/vertshadersrc.vert'));
 
   createSdkStub(publicDir);
   const present = sdkStatus(publicDir);
@@ -211,7 +213,25 @@ test('sdkStatus detects official SDK files under public/vendor/live2d/', () => {
     core: 'live2dcubismcore.min.js',
     framework: 'live2d.min.js',
   });
+  assert.deepEqual(present.missingFiles, []);
   assert.equal(present.shaderPath, '/vendor/live2d/shaders/WebGL/');
+
+  fs.rmSync(
+    path.join(publicDir, 'vendor', 'live2d', 'shaders', 'WebGL', 'fragshadersrcsetupmask.frag'),
+    { force: true }
+  );
+  const incomplete = sdkStatus(publicDir);
+  assert.equal(incomplete.available, false);
+  assert.deepEqual(incomplete.missingFiles, ['shaders/WebGL/fragshadersrcsetupmask.frag']);
+
+  createSdkStub(publicDir);
+  fs.writeFileSync(
+    path.join(publicDir, 'vendor', 'live2d', 'shaders', 'WebGL', 'fragshadersrcsetupmask.frag'),
+    ''
+  );
+  const empty = sdkStatus(publicDir);
+  assert.equal(empty.available, false);
+  assert.deepEqual(empty.missingFiles, ['shaders/WebGL/fragshadersrcsetupmask.frag']);
 });
 
 test('registry reports sdk availability alongside model readiness', () => {

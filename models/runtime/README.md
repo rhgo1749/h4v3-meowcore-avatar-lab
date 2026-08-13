@@ -115,9 +115,18 @@ for the exact version. Keep private staging under `models/private/`
 mkdir -p runtime/public/vendor/live2d
 cp <licensed-sdk>/Core/live2dcubismcore.min.js runtime/public/vendor/live2d/
 cp <licensed-sdk>/Framework/.../live2d.min.js      runtime/public/vendor/live2d/
+mkdir -p runtime/public/vendor/live2d/shaders/WebGL
+cp -r <licensed-sdk>/Shaders/WebGL/. runtime/public/vendor/live2d/shaders/WebGL/
 cp -r <licensed-model-export> models/runtime/<modelId>/
 AVATAR_MODEL_ID=<modelId> npm start   # from runtime/
 ```
+
+The shader copy must include every official WebGL shader file. The runtime
+reports the exact contract through `GET /api/model`: `sdk.shaderFiles` lists
+the required names and `sdk.missingFiles` explains why `sdk.available` is
+false. A missing, empty, or non-file shader keeps the Cubism path fail-closed;
+it never becomes render-ready based only on the Core/framework JavaScript
+files.
 
 Visual deformation/outline quality is a separate human gate
 (`docs/OUTLINE-RULES.md`, `docs/LIVE2D-RIG-SPEC.md`); a manifest that loads

@@ -312,6 +312,45 @@
     return response.arrayBuffer();
   }
 
+  /**
+   * Verify the complete official WebGL shader asset contract before asking
+   * Cubism to start its asynchronous shader loader. Cubism's loader catches
+   * individual fetch errors and substitutes an empty source, so relying on
+   * `_isShaderLoaded` alone would otherwise allow a false-ready renderer.
+   */
+  async function verifyShaderAssets(shaderPath, shaderFiles) {
+    if (
+      typeof shaderPath !== 'string' ||
+      !shaderPath.endsWith('/') ||
+      !Array.isArray(shaderFiles) ||
+      shaderFiles.length === 0
+    ) {
+      throw new Error('official Cubism shader asset manifest is missing');
+    }
+    const uniqueFiles = new Set();
+    for (const file of shaderFiles) {
+      if (
+        typeof file !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:vert|frag)$/.test(file) ||
+        uniqueFiles.has(file)
+      ) {
+        throw new Error('official Cubism shader asset name is invalid');
+      }
+      uniqueFiles.add(file);
+    }
+    await Promise.all([...uniqueFiles].map(async (file) => {
+      const response = await fetch(shaderPath + encodeURIComponent(file));
+      if (!response.ok) {
+        throw new Error(
+          'failed to load Cubism shader (' + response.status + '): ' + file
+        );
+      }
+      if ((await response.text()).trim().length === 0) {
+        throw new Error('Cubism shader is empty: ' + file);
+      }
+    }));
+  }
+
   function assetUrl(modelId, relativePath) {
     const encodedId = encodeURIComponent(modelId);
     const encodedPath = relativePath
@@ -372,6 +411,7 @@
       'CubismModelSettingJson',
       'CubismUserModel',
       'CubismRenderer_WebGL',
+      'CubismShaderManager_WebGL',
       'CubismMatrix44',
     ];
     const missing = required.filter((name) => typeof framework?.[name] !== 'function');
@@ -386,6 +426,50 @@
         throw new Error('official CubismFramework.' + method + '() is missing');
       }
     }
+    if (typeof framework.CubismShaderManager_WebGL.getInstance !== 'function') {
+      throw new Error('official CubismShaderManager_WebGL.getInstance() is missing');
+    }
+  }
+
+  /**
+   * CubismRenderer_WebGL.loadShaders() starts an asynchronous internal fetch
+   * but returns void. Observe the official shader manager state instead of
+   * treating that call as readiness. The official framework leaves loading
+   * false and loaded false when one of its shader fetches fails.
+   */
+  function waitForShaderReady(framework, gl, timeoutMs = 10000) {
+    const startedAt = Date.now();
+    let observedLoading = false;
+    return new Promise((resolve, reject) => {
+      function check() {
+        let shader;
+        try {
+          const manager = framework.CubismShaderManager_WebGL.getInstance();
+          shader = manager && manager.getShader(gl);
+          if (!shader) {
+            throw new Error('official Cubism shader manager has no WebGL shader state');
+          }
+          if (shader._isShaderLoaded === true) {
+            resolve(undefined);
+            return;
+          }
+          if (shader._isShaderLoading === true) {
+            observedLoading = true;
+          } else if (observedLoading) {
+            throw new Error('official Cubism shader loading failed');
+          }
+        } catch (error) {
+          reject(error);
+          return;
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          reject(new Error('official Cubism shader loading timed out'));
+          return;
+        }
+        setTimeout(check, 16);
+      }
+      check();
+    });
   }
 
   /**
@@ -535,8 +619,26 @@
         if (!cubismRenderer) {
           throw new Error('CubismUserModel did not create CubismRenderer_WebGL');
         }
+        if (typeof cubismRenderer.setIsPremultipliedAlpha !== 'function') {
+          throw new Error('official CubismRenderer.setIsPremultipliedAlpha() is missing');
+        }
+        // Cubism's official WebGL shader path requires premultiplied alpha.
+        // Set the renderer state before any texture setup can occur.
+        cubismRenderer.setIsPremultipliedAlpha(true);
         cubismRenderer.startUp(gl);
+        try {
+          await verifyShaderAssets(sdk.shaderPath, sdk.shaderFiles);
+        } catch (error) {
+          fail('shader-assets', error);
+          return;
+        }
         cubismRenderer.loadShaders(sdk.shaderPath || null);
+        try {
+          await waitForShaderReady(framework, gl);
+        } catch (error) {
+          fail('shader-load', error);
+          return;
+        }
         await loadTextures(settings, model.id, cubismRenderer, gl);
 
         state = 'ready';
@@ -591,5 +693,13 @@
 
   register('cubism', (options) => MeowcoreCubismAdapter(options));
 
-  return { create, kinds, register, placeholderScale, MeowcoreCubismAdapter };
+  return {
+    create,
+    kinds,
+    register,
+    placeholderScale,
+    MeowcoreCubismAdapter,
+    verifyShaderAssets,
+    waitForShaderReady,
+  };
 });

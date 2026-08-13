@@ -37,6 +37,23 @@ const DEFAULT_SDK_FILES = Object.freeze({
 });
 const SDK_BASE_PATH = '/vendor/live2d/';
 const SDK_SHADER_PATH = SDK_BASE_PATH + 'shaders/WebGL/';
+// Keep this list aligned with CubismShader_WebGL.loadShaders(). The official
+// framework fetches every file before it registers shader programs.
+const SDK_SHADER_FILES = Object.freeze([
+  'vertshadersrc.vert',
+  'vertshadersrcmasked.vert',
+  'vertshadersrcsetupmask.vert',
+  'vertshadersrccopy.vert',
+  'vertshadersrcblend.vert',
+  'fragshadersrcsetupmask.frag',
+  'fragshadersrcpremultipliedalpha.frag',
+  'fragshadersrcmaskpremultipliedalpha.frag',
+  'fragshadersrcmaskinvertedpremultipliedalpha.frag',
+  'fragshadersrccopy.frag',
+  'fragshadersrccolorblend.frag',
+  'fragshadersrcalphablend.frag',
+  'fragshadersrcpremultipliedalphablend.frag',
+]);
 
 function modelError(code, message) {
   return { code, message };
@@ -176,13 +193,24 @@ function validateManifest(manifest, modelsDir, modelId) {
 function sdkStatus(publicDir) {
   const sdkDir = path.join(publicDir, 'vendor', 'live2d');
   const files = { ...DEFAULT_SDK_FILES };
-  const corePath = path.join(sdkDir, files.core);
-  const frameworkPath = path.join(sdkDir, files.framework);
-  const available =
-    fs.existsSync(corePath) && fs.existsSync(frameworkPath);
+  const requiredFiles = [
+    files.core,
+    files.framework,
+    ...SDK_SHADER_FILES.map((file) => path.join('shaders', 'WebGL', file)),
+  ];
+  const missingFiles = requiredFiles.filter((file) => {
+    try {
+      const stat = fs.statSync(path.join(sdkDir, file));
+      return !stat.isFile() || stat.size === 0;
+    } catch {
+      return true;
+    }
+  });
   return {
-    available,
+    available: missingFiles.length === 0,
     files,
+    shaderFiles: [...SDK_SHADER_FILES],
+    missingFiles,
     basePath: SDK_BASE_PATH,
     shaderPath: SDK_SHADER_PATH,
   };
@@ -203,7 +231,7 @@ function sdkStatus(publicDir) {
  *   };
  *   manifest: any;
  *   mapping: any;
- *   sdk: { available: boolean; files: { core: string; framework: string }; basePath: string };
+ *   sdk: { available: boolean; files: { core: string; framework: string }; shaderFiles: string[]; missingFiles: string[]; basePath: string; shaderPath: string };
  * }}
  */
 function createModelRegistry({ modelsDir, publicDir, modelId }) {
@@ -290,6 +318,7 @@ function resolveModelAsset(modelsDir, modelId, relativePath) {
 module.exports = {
   DEFAULT_SDK_FILES,
   MODEL_ID_PATTERN,
+  SDK_SHADER_FILES,
   SDK_BASE_PATH,
   createModelRegistry,
   placeholderModel,

@@ -166,10 +166,13 @@ loader/controller semantics (no fake endpoints).
 
 1. **Live model viewport** — canvas renderer selected by the model registry:
    - `cubism` renderer: loads the licensed official Cubism SDK for Web from
-     `public/vendor/live2d/` (operator-installed, gitignored) and the model
-     from `models/runtime/<id>/`, applies the manifest mapping through the
-     shared module, and drives `setParameterValueById` per frame. Any load
-     step that fails is reported fail-closed with a specific message.
+     `public/vendor/live2d/` (operator-installed, gitignored), verifies the
+     complete `shaders/WebGL/` asset set, and loads the model from
+     `models/runtime/<id>/`. It enables premultiplied alpha on the official
+     renderer before texture setup, observes the SDK's asynchronous shader
+     manager state, applies the manifest mapping through the shared module,
+     and drives `setParameterValueById` per frame. Any missing/empty shader or
+     failed load step is reported fail-closed with a specific message.
    - `placeholder` renderer: deterministic Canvas 2D avatar derived only from
      the semantic controls (no randomness, no SDK). Used whenever no licensed
      model/SDK is configured; it is a placeholder visualization, not a
@@ -213,10 +216,12 @@ The smoke covers both dashboard modes without licensed assets:
 scenario 1 (placeholder dashboard: viewport renderer, presets, control
 round-trip, console errors 0) and scenario 2 (fixture model3/moc3 plus an
 official-surface test double: `CubismModelSettingJson`/`CubismUserModel`/
-`CubismRenderer_WebGL`, binary loader boundaries, ID-handle mapping,
-read-only mapped table). Scenario 2 writes gitignored fixture SDK files under
-`public/vendor/live2d/` and removes them afterwards; it is not a substitute
-for licensed SDK/model host validation.
+`CubismRenderer_WebGL`/`CubismShaderManager_WebGL`, complete shader asset
+contract, asynchronous readiness, premultiplied-alpha setter, binary loader
+boundaries, ID-handle mapping, read-only mapped table). Scenario 2 writes
+gitignored fixture SDK/shader files under `public/vendor/live2d/` and removes
+them afterwards; it is not a substitute for licensed SDK/model host
+validation.
 
 Docker service (host with Docker):
 

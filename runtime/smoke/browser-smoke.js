@@ -36,6 +36,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { SDK_SHADER_FILES } = require('../server/model');
 
 const BASE = process.env.AVATAR_SMOKE_BASE || 'http://127.0.0.1:8930';
 const RUNTIME_DIR = path.join(__dirname, '..');
@@ -53,6 +54,9 @@ window.__stubRendererCalls = [];
 window.__stubFrameworkCalls = [];
 window.__stubModelSetting = null;
 window.__stubModelLoadBytes = 0;
+window.__stubPremultipliedAlpha = null;
+window.__stubShaderPath = null;
+window.__stubShaderState = { _isShaderLoading: false, _isShaderLoaded: false };
 (function () {
   function CubismFramework() {}
   CubismFramework.startUp = function () {
@@ -70,6 +74,16 @@ window.__stubModelLoadBytes = 0;
       getId: function (id) {
         return { value: id };
       }
+    };
+  };
+
+  function CubismShaderManager_WebGL() {}
+  CubismShaderManager_WebGL.getInstance = function () {
+    return {
+      getShader: function () {
+        return window.__stubShaderState;
+      },
+      setGlContext: function () {}
     };
   };
 
@@ -128,11 +142,23 @@ window.__stubModelLoadBytes = 0;
     this.model = model;
     window.__stubRendererCalls.push('initialize');
   };
-  CubismRenderer_WebGL.prototype.startUp = function () {
+  CubismRenderer_WebGL.prototype.startUp = function (gl) {
     window.__stubRendererCalls.push('startUp');
+    CubismShaderManager_WebGL.getInstance().setGlContext(gl);
   };
-  CubismRenderer_WebGL.prototype.loadShaders = function () {
+  CubismRenderer_WebGL.prototype.setIsPremultipliedAlpha = function (value) {
+    window.__stubPremultipliedAlpha = value;
+    window.__stubRendererCalls.push('setIsPremultipliedAlpha');
+  };
+  CubismRenderer_WebGL.prototype.loadShaders = function (shaderPath) {
     window.__stubRendererCalls.push('loadShaders');
+    window.__stubShaderPath = shaderPath;
+    window.__stubShaderState._isShaderLoading = true;
+    window.__stubShaderState._isShaderLoaded = false;
+    Promise.resolve().then(function () {
+      window.__stubShaderState._isShaderLoading = false;
+      window.__stubShaderState._isShaderLoaded = true;
+    });
   };
   CubismRenderer_WebGL.prototype.bindTexture = function () {
     window.__stubRendererCalls.push('bindTexture');
@@ -180,6 +206,7 @@ window.__stubModelLoadBytes = 0;
     CubismModelSettingJson: CubismModelSettingJson,
     CubismUserModel: CubismUserModel,
     CubismRenderer_WebGL: CubismRenderer_WebGL,
+    CubismShaderManager_WebGL: CubismShaderManager_WebGL,
     CubismMatrix44: CubismMatrix44
   };
 }());
@@ -395,6 +422,14 @@ function installStubSdk(publicDir) {
   fs.mkdirSync(sdkDir, { recursive: true });
   fs.writeFileSync(path.join(sdkDir, 'live2dcubismcore.min.js'), STUB_SDK_CORE);
   fs.writeFileSync(path.join(sdkDir, 'live2d.min.js'), STUB_SDK_FRAMEWORK);
+  const shaderDir = path.join(sdkDir, 'shaders', 'WebGL');
+  fs.mkdirSync(shaderDir, { recursive: true });
+  for (const shaderFile of SDK_SHADER_FILES) {
+    fs.writeFileSync(
+      path.join(shaderDir, shaderFile),
+      '// stub shader ' + shaderFile + '\n'
+    );
+  }
   return sdkDir;
 }
 
@@ -446,6 +481,8 @@ async function scenarioCubism() {
     assert.equal(modelInfo.model.ready, true);
     assert.equal(modelInfo.sdk.available, true);
     assert.equal(modelInfo.sdk.shaderPath, '/vendor/live2d/shaders/WebGL/');
+    assert.deepEqual(modelInfo.sdk.missingFiles, []);
+    assert.deepEqual(modelInfo.sdk.shaderFiles, SDK_SHADER_FILES);
     assert.equal(modelInfo.manifest.model3, 'smoke.model3.json');
 
     const stateRes = await page.request.get(`${base}/api/state`);
@@ -479,14 +516,34 @@ async function scenarioCubism() {
       framework: /** @type {any} */ (window).__stubFrameworkCalls,
       setting: /** @type {any} */ (window).__stubModelSetting,
       modelLoadBytes: /** @type {any} */ (window).__stubModelLoadBytes,
+      premultipliedAlpha: /** @type {any} */ (window).__stubPremultipliedAlpha,
+      shaderPath: /** @type {any} */ (window).__stubShaderPath,
       renderer: /** @type {any} */ (window).__stubRendererCalls,
     }));
     assert.deepEqual(officialCalls.framework.slice(0, 2), ['startUp', 'initialize']);
     assert.ok(officialCalls.setting.bufferByteLength > 0, 'model3 passed as ArrayBuffer');
     assert.ok(officialCalls.modelLoadBytes > 0, 'moc3 passed as ArrayBuffer');
-    for (const method of ['initialize', 'startUp', 'loadShaders', 'drawModel']) {
+    for (const method of [
+      'initialize',
+      'setIsPremultipliedAlpha',
+      'startUp',
+      'loadShaders',
+      'drawModel',
+    ]) {
       assert.ok(officialCalls.renderer.includes(method), `renderer called ${method}`);
     }
+    assert.equal(officialCalls.premultipliedAlpha, true);
+    assert.equal(officialCalls.shaderPath, modelInfo.sdk.shaderPath);
+    assert.ok(
+      officialCalls.renderer.indexOf('setIsPremultipliedAlpha') <
+        officialCalls.renderer.indexOf('startUp'),
+      'premultiplied-alpha setter runs before renderer startup'
+    );
+    assert.ok(
+      officialCalls.renderer.indexOf('startUp') <
+        officialCalls.renderer.indexOf('loadShaders'),
+      'shader loading starts after renderer startup'
+    );
     assert.equal(
       modelInfo.sdk.shaderPath,
       '/vendor/live2d/shaders/WebGL/',

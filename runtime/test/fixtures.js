@@ -11,6 +11,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const { SDK_SHADER_FILES } = require('../server/model');
+
 const VALID_MAPPING = {
   angleX: [{ parameter: 'ParamAngleX', min: -30, max: 30, scale: 1, bias: 0 }],
   angleY: [{ parameter: 'ParamAngleY', min: -20, max: 20, scale: 1, bias: 0 }],
@@ -78,6 +80,11 @@ function createSdkStub(publicDir) {
   fs.mkdirSync(sdkDir, { recursive: true });
   fs.writeFileSync(path.join(sdkDir, 'live2dcubismcore.min.js'), '// stub core\n');
   fs.writeFileSync(path.join(sdkDir, 'live2d.min.js'), '// stub framework\n');
+  const shaderDir = path.join(sdkDir, 'shaders', 'WebGL');
+  fs.mkdirSync(shaderDir, { recursive: true });
+  for (const shaderFile of SDK_SHADER_FILES) {
+    fs.writeFileSync(path.join(shaderDir, shaderFile), '// stub shader ' + shaderFile + '\n');
+  }
   return sdkDir;
 }
 
