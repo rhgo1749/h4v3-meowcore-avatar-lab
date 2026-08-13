@@ -36,6 +36,7 @@ const DEFAULT_SDK_FILES = Object.freeze({
   framework: 'live2d.min.js',
 });
 const SDK_BASE_PATH = '/vendor/live2d/';
+const SDK_SHADER_PATH = SDK_BASE_PATH + 'shaders/WebGL/';
 
 function modelError(code, message) {
   return { code, message };
@@ -179,7 +180,12 @@ function sdkStatus(publicDir) {
   const frameworkPath = path.join(sdkDir, files.framework);
   const available =
     fs.existsSync(corePath) && fs.existsSync(frameworkPath);
-  return { available, files, basePath: SDK_BASE_PATH };
+  return {
+    available,
+    files,
+    basePath: SDK_BASE_PATH,
+    shaderPath: SDK_SHADER_PATH,
+  };
 }
 
 /**

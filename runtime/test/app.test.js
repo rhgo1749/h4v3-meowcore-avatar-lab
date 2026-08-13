@@ -342,6 +342,7 @@ test('GET /api/model serves the configured cubism manifest read-only', async () 
   assert.equal(body.manifest.kind, 'cubism');
   assert.equal(body.mapping.angleX[0].parameter, 'ParamAngleX');
   assert.equal(body.sdk.available, false);
+  assert.equal(body.sdk.shaderPath, '/vendor/live2d/shaders/WebGL/');
   removeFixture(fixture.root);
 });
 

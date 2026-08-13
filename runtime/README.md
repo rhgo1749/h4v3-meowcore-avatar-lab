@@ -59,6 +59,7 @@ runtime/
     public.test.js   public-surface XSS guard (no innerHTML)
     mapping.test.js  mapping clamp/direction regression tests
     model.test.js    model registry fail-closed tests
+    renderer.test.js placeholder squash-direction regression tests
     fixtures.js      disposable model/SDK fixtures for tests
   smoke/
     browser-smoke.js headless chromium smoke (M2 round-trip + M3 dashboard
@@ -210,10 +211,12 @@ npm run smoke:browser
 
 The smoke covers both dashboard modes without licensed assets:
 scenario 1 (placeholder dashboard: viewport renderer, presets, control
-round-trip, console errors 0) and scenario 2 (fixture cubism model + stub
-SDK: renderer activation, shared-mapping -> setParameterValueById
-round-trip, read-only mapped table). Scenario 2 writes gitignored stub SDK
-files under `public/vendor/live2d/` and removes them afterwards.
+round-trip, console errors 0) and scenario 2 (fixture model3/moc3 plus an
+official-surface test double: `CubismModelSettingJson`/`CubismUserModel`/
+`CubismRenderer_WebGL`, binary loader boundaries, ID-handle mapping,
+read-only mapped table). Scenario 2 writes gitignored fixture SDK files under
+`public/vendor/live2d/` and removes them afterwards; it is not a substitute
+for licensed SDK/model host validation.
 
 Docker service (host with Docker):
 

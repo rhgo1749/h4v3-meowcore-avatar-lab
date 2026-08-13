@@ -202,6 +202,7 @@ test('sdkStatus detects official SDK files under public/vendor/live2d/', () => {
   const missing = sdkStatus(publicDir);
   assert.equal(missing.available, false);
   assert.equal(missing.basePath, '/vendor/live2d/');
+  assert.equal(missing.shaderPath, '/vendor/live2d/shaders/WebGL/');
 
   createSdkStub(publicDir);
   const present = sdkStatus(publicDir);
@@ -210,6 +211,7 @@ test('sdkStatus detects official SDK files under public/vendor/live2d/', () => {
     core: 'live2dcubismcore.min.js',
     framework: 'live2d.min.js',
   });
+  assert.equal(present.shaderPath, '/vendor/live2d/shaders/WebGL/');
 });
 
 test('registry reports sdk availability alongside model readiness', () => {

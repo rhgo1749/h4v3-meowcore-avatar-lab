@@ -16,16 +16,18 @@
  *     round-trip through server state, inspector shows semantic state,
  *     reset/beat unchanged, mapped-params panel reports placeholder mode
  *
- * Scenario 2 (self-contained fixture cubism model + stub SDK):
+ * Scenario 2 (self-contained fixture cubism model + official-surface stub):
  *   - spawns its own server with AVATAR_MODEL_ID pointing at a temporary
  *     fixture manifest and writes stub official-SDK files into
  *     public/vendor/live2d/ (gitignored; removed afterwards)
- *   - verifies the dashboard activates the cubism renderer, the shared
- *     mapping module drives setParameterValueById on the (stub) model, and
- *     the read-only mapped-parameters table reflects semantic controls
+ *   - verifies the dashboard activates the cubism renderer, the model3/moc3
+ *     ArrayBuffer loader boundary is used, the shared mapping module drives
+ *     setParameterValueById with an ID handle, and the read-only table
+ *     reflects semantic controls
  *
- * The fixture SDK is a stand-in for the licensed official Cubism SDK for
- * Web; real-SDK E2E remains HOST_VALIDATION_REQUIRED.
+ * The fixture is not a renderer implementation. It is a narrow test double
+ * exposing the official class/function names and call boundaries used by the
+ * adapter. Real-SDK E2E remains HOST_VALIDATION_REQUIRED.
  */
 
 const { chromium } = require('playwright');
@@ -45,27 +47,142 @@ const CONTROL_IDS = [
 const STUB_SDK_CORE = `// stub live2dcubismcore.min.js (smoke fixture)
 window.Live2DCubismCore = {};
 `;
-const STUB_SDK_FRAMEWORK = `// stub live2d.min.js (smoke fixture)
+const STUB_SDK_FRAMEWORK = `// official-surface test double for live2d.min.js
 window.__stubModelCalls = [];
-window.Live2DCubismFramework = {
-  CubismFramework: { initialize: function () {} },
-  CubismModelSettingsJson: function (url) { this.url = url; },
-  CubismModel: function (settings) {
-    this.settings = settings;
+window.__stubRendererCalls = [];
+window.__stubFrameworkCalls = [];
+window.__stubModelSetting = null;
+window.__stubModelLoadBytes = 0;
+(function () {
+  function CubismFramework() {}
+  CubismFramework.startUp = function () {
+    window.__stubFrameworkCalls.push('startUp');
+    return true;
+  };
+  CubismFramework.initialize = function () {
+    window.__stubFrameworkCalls.push('initialize');
+  };
+  CubismFramework.dispose = function () {
+    window.__stubFrameworkCalls.push('dispose');
+  };
+  CubismFramework.getIdManager = function () {
+    return {
+      getId: function (id) {
+        return { value: id };
+      }
+    };
+  };
+
+  function CubismModelSettingJson(buffer, size) {
+    this.json = JSON.parse(new TextDecoder().decode(buffer));
+    this.size = size;
+    window.__stubModelSetting = { bufferByteLength: buffer.byteLength, size: size };
+  }
+  CubismModelSettingJson.prototype.getModelFileName = function () {
+    return this.json.FileReferences.Moc;
+  };
+  CubismModelSettingJson.prototype.getTextureCount = function () {
+    return Array.isArray(this.json.FileReferences.Textures)
+      ? this.json.FileReferences.Textures.length
+      : 0;
+  };
+  CubismModelSettingJson.prototype.getTextureFileName = function (index) {
+    return this.json.FileReferences.Textures[index];
+  };
+
+  function CubismMatrix44() {
+    this.operations = [];
+  }
+  CubismMatrix44.prototype.loadIdentity = function () {
+    this.operations.push('loadIdentity');
+  };
+  CubismMatrix44.prototype.multiplyByMatrix = function () {
+    this.operations.push('multiplyByMatrix');
+  };
+
+  function CubismModel() {
     this.params = {};
   }
-};
-window.Live2DCubismFramework.CubismModel.prototype.loadModel = async function () {};
-window.Live2DCubismFramework.CubismModel.prototype.createRenderer = function () {
-  return { setMvpMatrix: function () {} };
-};
-window.Live2DCubismFramework.CubismModel.prototype.setParameterValueById = function (id, value) {
-  this.params[id] = value;
-  window.__stubModelCalls.push({ id: id, value: value });
-};
-window.Live2DCubismFramework.CubismModel.prototype.update = function () {};
-window.Live2DCubismFramework.CubismModel.prototype.draw = function () {};
-window.Live2DCubismFramework.CubismMatrix44 = function () { this.scale = function () {}; };
+  CubismModel.prototype.loadModel = function (buffer) {
+    window.__stubModelLoadBytes = buffer.byteLength;
+  };
+  CubismModel.prototype.loadParameters = function () {};
+  CubismModel.prototype.saveParameters = function () {};
+  CubismModel.prototype.setParameterValueById = function (idHandle, value, weight) {
+    this.params[idHandle.value] = value;
+    window.__stubModelCalls.push({
+      id: idHandle.value,
+      idHandleType: typeof idHandle,
+      value: value,
+      weight: weight
+    });
+  };
+  CubismModel.prototype.update = function () {};
+
+  function CubismRenderer_WebGL(width, height) {
+    this.width = width;
+    this.height = height;
+    this.model = null;
+  }
+  CubismRenderer_WebGL.prototype.initialize = function (model) {
+    this.model = model;
+    window.__stubRendererCalls.push('initialize');
+  };
+  CubismRenderer_WebGL.prototype.startUp = function () {
+    window.__stubRendererCalls.push('startUp');
+  };
+  CubismRenderer_WebGL.prototype.loadShaders = function () {
+    window.__stubRendererCalls.push('loadShaders');
+  };
+  CubismRenderer_WebGL.prototype.bindTexture = function () {
+    window.__stubRendererCalls.push('bindTexture');
+  };
+  CubismRenderer_WebGL.prototype.setMvpMatrix = function () {
+    window.__stubRendererCalls.push('setMvpMatrix');
+  };
+  CubismRenderer_WebGL.prototype.setRenderState = function () {
+    window.__stubRendererCalls.push('setRenderState');
+  };
+  CubismRenderer_WebGL.prototype.drawModel = function () {
+    window.__stubRendererCalls.push('drawModel');
+  };
+  CubismRenderer_WebGL.prototype.release = function () {};
+
+  function CubismUserModel() {
+    this.model = null;
+    this.renderer = null;
+    this.modelMatrix = new CubismMatrix44();
+  }
+  CubismUserModel.prototype.loadModel = function (buffer) {
+    this.model = new CubismModel();
+    this.model.loadModel(buffer);
+  };
+  CubismUserModel.prototype.getModel = function () {
+    return this.model;
+  };
+  CubismUserModel.prototype.getModelMatrix = function () {
+    return this.modelMatrix;
+  };
+  CubismUserModel.prototype.createRenderer = function (width, height) {
+    this.renderer = new CubismRenderer_WebGL(width, height);
+    this.renderer.initialize(this.model);
+  };
+  CubismUserModel.prototype.getRenderer = function () {
+    return this.renderer;
+  };
+  CubismUserModel.prototype.setRenderTargetSize = function () {};
+  CubismUserModel.prototype.release = function () {
+    if (this.renderer) this.renderer.release();
+  };
+
+  window.Live2DCubismFramework = {
+    CubismFramework: CubismFramework,
+    CubismModelSettingJson: CubismModelSettingJson,
+    CubismUserModel: CubismUserModel,
+    CubismRenderer_WebGL: CubismRenderer_WebGL,
+    CubismMatrix44: CubismMatrix44
+  };
+}());
 `;
 
 const FIXTURE_MAPPING = {
@@ -269,6 +386,7 @@ function makeFixtureModel() {
     path.join(modelDir, 'smoke.model3.json'),
     JSON.stringify({ Version: 3, FileReferences: { Moc: 'smoke.moc3' } })
   );
+  fs.writeFileSync(path.join(modelDir, 'smoke.moc3'), Buffer.from('smoke moc3 fixture'));
   return { root, modelsDir: path.join(root, 'models'), modelId };
 }
 
@@ -327,6 +445,7 @@ async function scenarioCubism() {
     assert.equal(modelInfo.model.kind, 'cubism');
     assert.equal(modelInfo.model.ready, true);
     assert.equal(modelInfo.sdk.available, true);
+    assert.equal(modelInfo.sdk.shaderPath, '/vendor/live2d/shaders/WebGL/');
     assert.equal(modelInfo.manifest.model3, 'smoke.model3.json');
 
     const stateRes = await page.request.get(`${base}/api/state`);
@@ -354,10 +473,33 @@ async function scenarioCubism() {
       return r && Object.keys(r.status().appliedParameters).length >= 8;
     }, { timeout: 5000 });
 
-    // Stub model received parameter sets from the mapping engine.
+    // Official loading boundaries were exercised with binary buffers, not a
+    // URL constructor or a high-level model.loadModel() shortcut.
+    const officialCalls = await page.evaluate(() => ({
+      framework: /** @type {any} */ (window).__stubFrameworkCalls,
+      setting: /** @type {any} */ (window).__stubModelSetting,
+      modelLoadBytes: /** @type {any} */ (window).__stubModelLoadBytes,
+      renderer: /** @type {any} */ (window).__stubRendererCalls,
+    }));
+    assert.deepEqual(officialCalls.framework.slice(0, 2), ['startUp', 'initialize']);
+    assert.ok(officialCalls.setting.bufferByteLength > 0, 'model3 passed as ArrayBuffer');
+    assert.ok(officialCalls.modelLoadBytes > 0, 'moc3 passed as ArrayBuffer');
+    for (const method of ['initialize', 'startUp', 'loadShaders', 'drawModel']) {
+      assert.ok(officialCalls.renderer.includes(method), `renderer called ${method}`);
+    }
+    assert.equal(
+      modelInfo.sdk.shaderPath,
+      '/vendor/live2d/shaders/WebGL/',
+      'renderer receives the official WebGL shader directory'
+    );
+
+    // Stub model received parameter sets from the mapping engine through the
+    // official ID-handle boundary.
     await page.waitForFunction(() => {
       const calls = /** @type {any} */ (window).__stubModelCalls || [];
-      return calls.some((c) => c.id === 'ParamEyeLOpen' && c.value === 1);
+      return calls.some((c) =>
+        c.id === 'ParamEyeLOpen' && c.value === 1 && c.idHandleType === 'object'
+      );
     });
 
     // Control round-trip: blink closed -> eye open parameter becomes 0.
@@ -369,7 +511,9 @@ async function scenarioCubism() {
     });
     await page.waitForFunction(() => {
       const calls = /** @type {any} */ (window).__stubModelCalls || [];
-      return calls.some((c) => c.id === 'ParamEyeLOpen' && c.value === 0);
+      return calls.some((c) =>
+        c.id === 'ParamEyeLOpen' && c.value === 0 && c.idHandleType === 'object'
+      );
     });
 
     // Read-only mapped parameters table reflects the same values.
@@ -381,8 +525,8 @@ async function scenarioCubism() {
 
     assert.deepEqual(consoleErrors, [], 'no fatal console errors in cubism scenario');
     console.log('SCENARIO 2 (fixture cubism renderer) PASS');
-    console.log('  model        -> cubism ready (fixture manifest + stub SDK)');
-    console.log('  mapping      -> shared module -> setParameterValueById round-trip');
+    console.log('  model        -> cubism ready (fixture model3/moc3 + official-surface stub)');
+    console.log('  mapping      -> shared module -> ID handle -> setParameterValueById round-trip');
     console.log('  mapped table -> read-only rows for 8+ parameters');
     console.log('  console errors: 0');
   } finally {

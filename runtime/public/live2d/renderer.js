@@ -115,8 +115,7 @@
       const smile = value('smile', 0); // -1 frown .. 1 smile
 
       const bob = -bounce * 70;
-      const scaleY = 1 + squash * 0.16;
-      const scaleX = 1 - squash * 0.1;
+      const { scaleX, scaleY } = placeholderScale(squash);
       const bodyShift = bodyX * 46;
       const headX = 320 + bodyShift * 0.35;
       const headY = 330 + bob + angleY * 3;
@@ -276,9 +275,22 @@
 
   register('placeholder', placeholderFactory);
 
+  function placeholderScale(squash) {
+    const value = typeof squash === 'number' && Number.isFinite(squash) ? squash : 0;
+    return {
+      // M2 contract: -1 is vertical stretch and +1 is vertical squash.
+      scaleX: 1 - value * 0.1,
+      scaleY: 1 - value * 0.16,
+    };
+  }
+
   // ---------------------------------------------------------------------
   // Cubism renderer: official Cubism SDK for Web adapter.
   // ---------------------------------------------------------------------
+
+  function errorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 
   function loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -290,27 +302,175 @@
     });
   }
 
-  function cubismFactory({ canvas, model, manifest, mapping, sdk, log }) {
+  async function fetchArrayBuffer(url, description) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(
+        'failed to load ' + description + ' (' + response.status + '): ' + url
+      );
+    }
+    return response.arrayBuffer();
+  }
+
+  function assetUrl(modelId, relativePath) {
+    const encodedId = encodeURIComponent(modelId);
+    const encodedPath = relativePath
+      .split('/')
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+    return '/models/' + encodedId + '/' + encodedPath;
+  }
+
+  function loadImage(url) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('failed to load texture: ' + url));
+      image.src = url;
+    });
+  }
+
+  /**
+   * Load and bind model textures using the official renderer boundary.
+   * CubismModelSettingJson returns the file names; CubismRenderer_WebGL owns
+   * the texture indices through bindTexture().
+   */
+  async function loadTextures(settings, modelId, renderer, gl) {
+    const textureCount = settings.getTextureCount();
+    for (let index = 0; index < textureCount; index += 1) {
+      const fileName = settings.getTextureFileName(index);
+      if (!fileName) {
+        continue;
+      }
+      const image = await loadImage(assetUrl(modelId, fileName));
+      const texture = gl.createTexture();
+      if (!texture) {
+        throw new Error('WebGL texture allocation failed for ' + fileName);
+      }
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        image
+      );
+      renderer.bindTexture(index, texture);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, null);
+  }
+
+  function requireOfficialSurface(framework) {
+    const required = [
+      'CubismFramework',
+      'CubismModelSettingJson',
+      'CubismUserModel',
+      'CubismRenderer_WebGL',
+      'CubismMatrix44',
+    ];
+    const missing = required.filter((name) => typeof framework?.[name] !== 'function');
+    if (missing.length > 0) {
+      throw new Error(
+        'official Cubism SDK surface missing: ' + missing.join(', ')
+      );
+    }
+    const cubismFramework = framework.CubismFramework;
+    for (const method of ['startUp', 'initialize', 'getIdManager']) {
+      if (typeof cubismFramework[method] !== 'function') {
+        throw new Error('official CubismFramework.' + method + '() is missing');
+      }
+    }
+  }
+
+  /**
+   * Minimal LAppModel-shaped adapter.
+   *
+   * The official sample does not construct CubismModel from a URL. It
+   * fetches model3.json as bytes, parses CubismModelSettingJson, fetches the
+   * referenced moc3 bytes, then lets CubismUserModel create the
+   * CubismRenderer_WebGL instance. Keep that ownership boundary here.
+   */
+  function MeowcoreCubismAdapter({ canvas, model, manifest, mapping, sdk, log }) {
     let frameId = 0;
     let controls = null;
     let state = 'loading';
     let message = 'initializing cubism renderer…';
     let appliedParameters = {};
     /** @type {any} */
+    let userModel = null;
+    /** @type {any} */
     let cubismModel = null;
     /** @type {any} */
+    let cubismRenderer = null;
+    /** @type {any} */
     let gl = null;
+    /** @type {any} */
+    let framework = null;
     let failed = false;
+    let disposed = false;
 
     function fail(step, error) {
-      if (failed) {
+      if (failed || disposed) {
         return;
       }
       failed = true;
       state = 'error';
-      message = 'cubism renderer error at ' + step + ': ' + error.message;
+      message = 'cubism renderer error at ' + step + ': ' + errorMessage(error);
       if (log) {
         log('model error: ' + message);
+      }
+    }
+
+    function parameterId(parameter) {
+      const idManager = framework.CubismFramework.getIdManager();
+      if (!idManager || typeof idManager.getId !== 'function') {
+        throw new Error('official Cubism ID manager is unavailable');
+      }
+      return idManager.getId(parameter);
+    }
+
+    function drawFrame() {
+      if (failed || disposed || !cubismModel || !cubismRenderer) {
+        return;
+      }
+      frameId = requestAnimationFrame(drawFrame);
+      try {
+        if (!root.MeowcoreMapping) {
+          throw new Error('shared mapping module (MeowcoreMapping) is missing');
+        }
+        if (typeof cubismModel.loadParameters === 'function') {
+          cubismModel.loadParameters();
+        }
+        appliedParameters = root.MeowcoreMapping.applyMapping(
+          mapping,
+          controls || {}
+        );
+        for (const [parameter, parameterValue] of Object.entries(appliedParameters)) {
+          cubismModel.setParameterValueById(
+            parameterId(parameter),
+            parameterValue,
+            1.0
+          );
+        }
+        cubismModel.update();
+
+        const matrix = new framework.CubismMatrix44();
+        matrix.loadIdentity();
+        const modelMatrix = userModel.getModelMatrix();
+        if (modelMatrix) {
+          matrix.multiplyByMatrix(modelMatrix);
+        }
+        cubismRenderer.setMvpMatrix(matrix);
+        cubismRenderer.setRenderState(null, [0, 0, canvas.width, canvas.height]);
+        cubismRenderer.drawModel(sdk.shaderPath || null);
+      } catch (error) {
+        fail('frame', error);
       }
     }
 
@@ -328,82 +488,65 @@
         fail('sdk-load', error);
         return;
       }
-      const framework = root.Live2DCubismFramework;
-      if (
-        !framework ||
-        !framework.CubismFramework ||
-        !framework.CubismModelSettingsJson ||
-        !framework.CubismModel
-      ) {
-        fail(
-          'sdk-surface',
-          new Error(
-            'Live2DCubismFramework globals missing; expected official ' +
-              'Cubism SDK for Web files at ' + sdk.basePath
-          )
-        );
-        return;
-      }
-
-      // WebGL is required by the official SDK renderer.
-      gl =
-        canvas.getContext('webgl2') ||
-        canvas.getContext('webgl') ||
-        canvas.getContext('experimental-webgl');
-      if (!gl) {
-        fail('webgl', new Error('WebGL context is unavailable on this canvas'));
-        return;
-      }
 
       try {
-        framework.CubismFramework.initialize();
-        const model3Url = '/models/' + model.id + '/' + manifest.model3;
-        const settings = new framework.CubismModelSettingsJson(model3Url);
-        cubismModel = new framework.CubismModel(settings);
-        await cubismModel.loadModel();
-        const renderer = cubismModel.createRenderer
-          ? cubismModel.createRenderer()
-          : null;
-        if (renderer && renderer.setMvpMatrix && framework.CubismMatrix44) {
-          const matrix = new framework.CubismMatrix44();
-          matrix.scale(1, canvas.clientHeight / canvas.clientWidth, 1);
-          renderer.setMvpMatrix(matrix);
+        framework = root.Live2DCubismFramework;
+        if (!framework) {
+          throw new Error('Live2DCubismFramework global is missing');
         }
+        requireOfficialSurface(framework);
+
+        // The official sample starts the framework before constructing a
+        // CubismModelSettingJson or CubismUserModel.
+        framework.CubismFramework.startUp();
+        framework.CubismFramework.initialize();
+
+        gl =
+          canvas.getContext('webgl2') ||
+          canvas.getContext('webgl') ||
+          canvas.getContext('experimental-webgl');
+        if (!gl) {
+          throw new Error('WebGL context is unavailable on this canvas');
+        }
+
+        const model3Url = assetUrl(model.id, manifest.model3);
+        const model3Buffer = await fetchArrayBuffer(model3Url, 'model3.json');
+        const settings = new framework.CubismModelSettingJson(
+          model3Buffer,
+          model3Buffer.byteLength
+        );
+        const modelFileName = settings.getModelFileName();
+        if (!modelFileName) {
+          throw new Error('model3.json does not reference a moc3 file');
+        }
+        const mocBuffer = await fetchArrayBuffer(
+          assetUrl(model.id, modelFileName),
+          'moc3 model'
+        );
+
+        userModel = new framework.CubismUserModel();
+        userModel.loadModel(mocBuffer);
+        cubismModel = userModel.getModel();
+        if (!cubismModel) {
+          throw new Error('CubismUserModel did not create a CubismModel');
+        }
+        userModel.createRenderer(canvas.width, canvas.height);
+        cubismRenderer = userModel.getRenderer();
+        if (!cubismRenderer) {
+          throw new Error('CubismUserModel did not create CubismRenderer_WebGL');
+        }
+        cubismRenderer.startUp(gl);
+        cubismRenderer.loadShaders(sdk.shaderPath || null);
+        await loadTextures(settings, model.id, cubismRenderer, gl);
+
         state = 'ready';
         message = 'cubism model ready: ' + model.id;
         if (log) {
           log('model ready: ' + model.id);
         }
-        frameId = requestAnimationFrame(frame);
+        frameId = requestAnimationFrame(drawFrame);
       } catch (error) {
         fail('model-load', error);
-      }
-    }
-
-    function frame() {
-      frameId = requestAnimationFrame(frame);
-      if (failed || !cubismModel) {
-        return;
-      }
-      try {
-        if (!root.MeowcoreMapping) {
-          throw new Error('shared mapping module (MeowcoreMapping) is missing');
-        }
-        appliedParameters = root.MeowcoreMapping.applyMapping(
-          mapping,
-          controls || {}
-        );
-        for (const [parameter, parameterValue] of Object.entries(appliedParameters)) {
-          if (typeof cubismModel.setParameterValueById === 'function') {
-            cubismModel.setParameterValueById(parameter, parameterValue, 1.0);
-          }
-        }
-        cubismModel.update();
-        if (typeof cubismModel.draw === 'function') {
-          cubismModel.draw(gl);
-        }
-      } catch (error) {
-        fail('frame', error);
       }
     }
 
@@ -412,8 +555,8 @@
     }
 
     function resize() {
-      if (gl && cubismModel) {
-        gl.viewport(0, 0, canvas.width, canvas.height);
+      if (gl && userModel) {
+        userModel.setRenderTargetSize(canvas.width, canvas.height);
       }
     }
 
@@ -428,17 +571,25 @@
     }
 
     function dispose() {
+      disposed = true;
       if (frameId !== 0) {
         cancelAnimationFrame(frameId);
         frameId = 0;
       }
+      if (userModel && typeof userModel.release === 'function') {
+        userModel.release();
+      }
+      userModel = null;
+      cubismModel = null;
+      cubismRenderer = null;
+      gl = null;
     }
 
-    initialize();
+    void initialize();
     return { kind: 'cubism', setControls, resize, status, dispose };
   }
 
-  register('cubism', cubismFactory);
+  register('cubism', (options) => MeowcoreCubismAdapter(options));
 
-  return { create, kinds, register };
+  return { create, kinds, register, placeholderScale, MeowcoreCubismAdapter };
 });
