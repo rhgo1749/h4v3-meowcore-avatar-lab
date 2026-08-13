@@ -108,27 +108,46 @@ Owns GUI-only and aesthetic operations:
 
 The exported artifact becomes the runtime input. Hermes is expected to reproduce and validate the post-export pipeline, not the Cubism GUI editing session.
 
-## Implemented interface (M2)
+## Implemented interface (M2 + M3)
 
-Runtime with a deterministic placeholder and server-owned semantic controls
-(no Live2D model yet):
+Runtime with a deterministic placeholder (M3 adds a renderer adapter path
+for licensed Cubism models; no Live2D model ships in the repository):
 
 ```text
 GET /healthz   machine-readable readiness JSON (status/ready/version/model)
-GET /api/state runtime state (placeholder model, semantic state, counters)
+GET /api/state runtime state (model, semantic controls, mapped params, counters)
 POST /api/control { id, value } bounded semantic control update
 POST /api/reset  reset semantic controls to defaults
 POST /api/beat   record one discrete beat event
 GET /          clean avatar output surface
-GET /debug     semantic control/state validation surface
+GET /debug     M3 visual dashboard (viewport + controls + inspector + presets)
 ```
+
+M3 read-only model contract (no mutation surface):
+
+```text
+GET /api/model             model descriptor + manifest + mapping + SDK status
+GET /models/<id>/<file>    bounded static serving inside the configured model dir
+GET /js/mapping.js         shared semantic -> Cubism mapping module (browser)
+```
+
+The renderer layer is browser-side: the dashboard selects the `cubism`
+adapter (official Cubism SDK for Web, operator-installed under
+`runtime/public/vendor/live2d/`) when a validated model manifest exists and
+the SDK files are present; otherwise it renders the deterministic Canvas 2D
+placeholder and states why. Raw Cubism parameter ids appear read-only in
+`/api/state.mapped` and the dashboard inspector; they are never accepted by
+a mutation endpoint. See `models/runtime/README.md` for the manifest
+contract and `runtime/README.md` for the operator install procedure.
 
 Implementation lives in `runtime/` (Node.js, zero runtime dependencies),
 served as a Docker service via `compose.yaml`. Config: `AVATAR_BIND`
 (bare-process listen, default `127.0.0.1`), `AVATAR_HOST_BIND` (compose host
 publish bind, default `127.0.0.1`, loopback-only; `0.0.0.0` is explicit
-opt-in external exposure) and `AVATAR_PORT` (default `8930`, invalid values
-fail fast). See `runtime/README.md` for commands and validation.
+opt-in external exposure), `AVATAR_PORT` (default `8930`, invalid values
+fail fast), `AVATAR_MODEL_ID` / `AVATAR_MODELS_DIR` / `AVATAR_MODELS_DIR_HOST`
+(model selection and licensed-model mount). See `runtime/README.md` for
+commands and validation.
 
 ## Future interface
 
@@ -174,8 +193,10 @@ POST /api/beat     empty body
 Continuous controls are defined in one server-side schema with defaults and
 min/max clamping. `beat` is a discrete event observed through a counter and
 timestamp in `/api/state`; it is not a persistent continuous parameter. M3
-may add a renderer/model adapter behind this contract without changing its
-semantic ownership boundary.
+adds a renderer/model adapter behind this contract without changing its
+semantic ownership boundary: the mapping config is per-model and read-only,
+and the rendered result is reported back as `mapped` parameters in
+`/api/state` (never as a mutation surface).
 
 ## Lifecycle principle
 

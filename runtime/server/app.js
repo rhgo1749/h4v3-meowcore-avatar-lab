@@ -5,12 +5,17 @@
  *
  * M2 surface (actual semantics only, no fake endpoints):
  *   GET /healthz   machine-readable service readiness
- *   GET /api/state real runtime state (placeholder model + semantic controls)
+ *   GET /api/state real runtime state (model + semantic controls + mapped)
  *   POST /api/control bounded semantic control update
  *   POST /api/reset reset semantic controls to defaults
  *   POST /api/beat trigger a bounded beat event
  *   GET /          clean avatar output surface
  *   GET /debug     validation/test surface
+ *
+ * M3 surface (read-only model contract, no mutation):
+ *   GET /api/model           model descriptor + manifest + mapping + SDK status
+ *   GET /models/<id>/<file>  bounded static serving inside the model directory
+ *   GET /js/mapping.js       shared semantic->Cubism mapping module (client)
  *
  * Future endpoints (reload/expression/motion/parameter/ws) are deliberately
  * NOT implemented until their semantics exist.
@@ -19,6 +24,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { applyMapping } = require('../shared/mapping');
+const { createModelRegistry, resolveModelAsset } = require('./model');
 const {
   resetControls,
   semanticState,
@@ -33,6 +40,11 @@ const CONTENT_TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.moc3': 'application/octet-stream',
+  '.bin': 'application/octet-stream',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 function sendJson(res, status, body) {
@@ -64,7 +76,11 @@ function healthBody(config, state) {
   };
 }
 
-function stateBody(config, state) {
+function stateBody(config, state, registry) {
+  const mapped =
+    registry && registry.mapping
+      ? applyMapping(registry.mapping, state.controls)
+      : {};
   return {
     service: config.serviceName,
     version: config.version,
@@ -73,8 +89,11 @@ function stateBody(config, state) {
       id: state.model.id,
       loaded: state.model.loaded,
       kind: state.model.kind,
+      ready: state.model.ready,
+      error: state.model.error,
     },
     parameters: state.parameters,
+    mapped,
     semantic: semanticState(state),
     counters: state.counters,
   };
@@ -322,7 +341,19 @@ const PAGES = {
   '/debug': 'debug.html',
 };
 
-function serveStatic(res, publicDir, routePath) {
+function sendFile(res, filePath) {
+  let content;
+  try {
+    content = fs.readFileSync(filePath);
+  } catch {
+    return false;
+  }
+  const ext = path.extname(filePath).toLowerCase();
+  sendText(res, 200, content, CONTENT_TYPES[ext] || 'application/octet-stream');
+  return true;
+}
+
+function servePage(res, publicDir, routePath) {
   const name = PAGES[routePath];
   if (!name) {
     return false;
@@ -331,18 +362,38 @@ function serveStatic(res, publicDir, routePath) {
   if (resolved !== publicDir && !resolved.startsWith(publicDir + path.sep)) {
     return false;
   }
-  let content;
-  try {
-    content = fs.readFileSync(resolved);
-  } catch {
-    return false;
-  }
-  const ext = path.extname(resolved).toLowerCase();
-  sendText(res, 200, content, CONTENT_TYPES[ext] || 'application/octet-stream');
-  return true;
+  return sendFile(res, resolved);
 }
 
-function createHandler({ config, state, publicDir }) {
+/**
+ * Serve any GET path under publicDir (bounded static assets: renderer.js,
+ * future vendored SDK files). Traversal is rejected by resolution guard.
+ */
+function servePublicAsset(res, publicDir, pathname) {
+  const relative = pathname.replace(/^\/+/, '');
+  if (!relative || relative.length === 0) {
+    return false;
+  }
+  const resolved = path.resolve(publicDir, relative);
+  if (resolved !== publicDir && !resolved.startsWith(publicDir + path.sep)) {
+    return false;
+  }
+  return sendFile(res, resolved);
+}
+
+/**
+ * @param {{ config: any; state: any; publicDir: string; modelRegistry?: any }} options
+ */
+function createHandler({ config, state, publicDir, modelRegistry }) {
+  const registry =
+    modelRegistry === undefined
+      ? createModelRegistry({
+          modelsDir: config.modelsDir,
+          publicDir,
+          modelId: config.modelId || '',
+        })
+      : modelRegistry;
+
   return async function handler(req, res) {
     let url;
     try {
@@ -360,7 +411,38 @@ function createHandler({ config, state, publicDir }) {
       return;
     }
     if (req.method === 'GET' && pathname === '/api/state') {
-      sendJson(res, 200, stateBody(config, state));
+      sendJson(res, 200, stateBody(config, state, registry));
+      return;
+    }
+    if (req.method === 'GET' && pathname === '/api/model') {
+      sendJson(res, 200, {
+        model: registry.model,
+        manifest: registry.manifest,
+        mapping: registry.mapping,
+        sdk: registry.sdk,
+      });
+      return;
+    }
+    if (req.method === 'GET' && pathname === '/js/mapping.js') {
+      const mappingPath = path.join(__dirname, '..', 'shared', 'mapping.js');
+      if (sendFile(res, mappingPath)) {
+        return;
+      }
+    }
+    if (req.method === 'GET' && pathname.startsWith('/models/')) {
+      const segments = pathname.split('/');
+      // ['', 'models', modelId, ...relative]
+      const modelId = segments[2];
+      const relative = segments.slice(3).join('/');
+      const configured =
+        registry.model.kind === 'cubism' && modelId === registry.model.id;
+      if (configured && relative) {
+        const resolved = resolveModelAsset(registry.modelsDir, modelId, relative);
+        if (resolved !== null && sendFile(res, resolved)) {
+          return;
+        }
+      }
+      sendJson(res, 404, { error: 'not found', path: pathname });
       return;
     }
     if (req.method === 'POST' && pathname === '/api/control') {
@@ -423,7 +505,12 @@ function createHandler({ config, state, publicDir }) {
       return;
     }
     if (req.method === 'GET' && (pathname === '/' || pathname === '/debug')) {
-      if (serveStatic(res, publicDir, pathname)) {
+      if (servePage(res, publicDir, pathname)) {
+        return;
+      }
+    }
+    if (req.method === 'GET') {
+      if (servePublicAsset(res, publicDir, pathname)) {
         return;
       }
     }

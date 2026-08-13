@@ -1,7 +1,7 @@
 {
   "name": "meowcore-avatar-runtime",
   "version": "0.1.0",
-  "description": "Host-served Meowcore Avatar Runtime (M2 semantic control surface)",
+  "description": "Host-served Meowcore Avatar Runtime (M3 visual dashboard + Live2D renderer adapter)",
   "private": true,
   "license": "UNLICENSED",
   "type": "commonjs",

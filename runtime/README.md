@@ -1,4 +1,4 @@
-# Avatar Runtime (PR-001 bootstrap + M2 semantic controls)
+# Avatar Runtime (PR-001 bootstrap + M2 semantic controls + M3 visual dashboard)
 
 Host-served Meowcore Avatar Runtime skeleton. Ubuntu-host Docker service;
 Hermes and H4V3-DJ are HTTP/WebSocket clients (see `docs/ARCHITECTURE.md`).
@@ -35,29 +35,46 @@ HTTP-wise but the future renderer path is JS/WASM).
 ```text
 runtime/
   server/
-    config.js    AVATAR_BIND / AVATAR_PORT loading (defaults 127.0.0.1:8930)
-    state.js     runtime state singleton (placeholder model contract slot)
+    config.js    AVATAR_BIND / AVATAR_PORT / AVATAR_MODEL_ID / AVATAR_MODELS_DIR
+    state.js     runtime state singleton (placeholder or configured model)
+    model.js     M3 model registry: manifest validation, fail-closed states,
+                 bounded model asset resolution
     app.js       HTTP handler (routing, static serving, traversal guard)
     server.js    entry point + graceful SIGTERM/SIGINT shutdown
+  shared/
+    mapping.js   semantic -> Cubism parameter mapping engine (server + browser)
   public/
     index.html   clean avatar output surface (/)
-    debug.html   validation surface (/debug)
+    debug.html   M3 visual dashboard (/debug)
+    live2d/
+      renderer.js  renderer registry: deterministic placeholder + cubism
+                   adapter (official SDK for Web, fail-closed)
+    vendor/      gitignored; licensed official Cubism SDK for Web lives here
+                 (operator-installed)
   test/
     app.test.js      route/contract tests (node:test)
     state.test.js    semantic defaults/range/event tests
     config.test.js   env config tests
     compose.test.js  compose bind-contract tests (AVATAR_HOST_BIND etc.)
     public.test.js   public-surface XSS guard (no innerHTML)
+    mapping.test.js  mapping clamp/direction regression tests
+    model.test.js    model registry fail-closed tests
+    renderer.test.js placeholder squash-direction regression tests
+    fixtures.js      disposable model/SDK fixtures for tests
   smoke/
-    browser-smoke.js headless chromium smoke (Playwright, run with server up)
+    browser-smoke.js headless chromium smoke (M2 round-trip + M3 dashboard
+                     + fixture cubism renderer round-trip)
   Dockerfile     node:22-alpine, HEALTHCHECK, non-root (USER node)
 ```
 
 Repository root additionally owns:
 
 ```text
-compose.yaml             avatar-runtime service (AVATAR_HOST_BIND host bind)
+compose.yaml             avatar-runtime service (AVATAR_HOST_BIND host bind,
+                        AVATAR_MODELS_DIR_HOST model volume)
 scripts/avatar-runtime   bounded lifecycle entry point
+models/runtime/          operator-provided licensed model manifests (contract:
+                        models/runtime/README.md; no binaries committed)
 ```
 
 ## Configuration
@@ -71,6 +88,15 @@ AVATAR_BIND        default 127.0.0.1  process listen bind (bare `node` runs/test
 AVATAR_HOST_BIND   default 127.0.0.1  compose HOST publish bind (loopback-only;
                                      0.0.0.0 = explicit opt-in external exposure)
 AVATAR_PORT        default 8930       integer 1..65535, invalid values fail fast
+AVATAR_MODEL_ID    default (empty)    configured model directory under
+                                     models/runtime; empty = placeholder renderer
+AVATAR_MODELS_DIR  default <repo>/models/runtime
+                                     model manifest root for bare `node` runs
+AVATAR_MODELS_DIR_HOST
+                   default ./models/runtime
+                                     compose HOST directory mounted read-only at
+                                     /srv/avatar-runtime/models/runtime (inject
+                                     licensed model manifests/assets)
 ```
 
 In the compose path (`compose.yaml`) the container-internal listen is fixed to
@@ -82,13 +108,27 @@ host side only; the default remains loopback-only per `docs/SECURITY.md`.
 
 ```text
 GET /healthz   machine-readable readiness JSON (status/ready/version/model)
-GET /api/state runtime state (placeholder model, semantic controls, events, counters)
+GET /api/state runtime state (model, semantic controls, mapped params, events, counters)
 POST /api/control {"id":"<semantic id>","value":<number>} (bounded/clamped)
 POST /api/reset  empty body; reset all semantic controls to defaults
 POST /api/beat   empty body; record one discrete beat event
 GET /          clean avatar output surface
-GET /debug     deterministic semantic control and state validation surface
+GET /debug     M3 visual dashboard (viewport + controls + inspector + presets)
 ```
+
+### M3 model contract (read-only)
+
+```text
+GET /api/model             model descriptor + manifest + mapping + SDK status
+GET /models/<id>/<file>    bounded static serving inside the configured model
+                           directory (traversal-guarded, modelId allowlist)
+GET /js/mapping.js         shared semantic -> Cubism mapping module (the exact
+                           code the server tests use, served to the browser)
+```
+
+There is no mutation endpoint for raw Cubism parameters. Mapped parameter
+values appear read-only in `/api/state` (`mapped`) and in the dashboard
+inspector; the public mutation API accepts only the eight semantic ids.
 
 The server owns the semantic state. The public ids are deliberately not
 Cubism/ArtMesh ids:
@@ -118,8 +158,36 @@ persistent continuous control.
 
 Deliberately **not** implemented yet: reload/expression/motion/parameter
 endpoints and `/ws/events`. They will appear only together with real model
-loader/controller semantics (no fake endpoints). M3 should add only a
-renderer/model adapter from these semantic ids to Cubism parameters.
+loader/controller semantics (no fake endpoints).
+
+## M3 visual dashboard (/debug)
+
+`/debug` renders three layers on one screen:
+
+1. **Live model viewport** — canvas renderer selected by the model registry:
+   - `cubism` renderer: loads the licensed official Cubism SDK for Web from
+     `public/vendor/live2d/` (operator-installed, gitignored), verifies the
+     complete `shaders/WebGL/` asset set, and loads the model from
+     `models/runtime/<id>/`. It enables premultiplied alpha on the official
+     renderer before texture setup, observes the SDK's asynchronous shader
+     manager state, applies the manifest mapping through the shared module,
+     and drives `setParameterValueById` per frame. Any missing/empty shader or
+     failed load step is reported fail-closed with a specific message.
+   - `placeholder` renderer: deterministic Canvas 2D avatar derived only from
+     the semantic controls (no randomness, no SDK). Used whenever no licensed
+     model/SDK is configured; it is a placeholder visualization, not a
+     Live2D renderer.
+2. **Semantic control panel** — the M2 contract unchanged: 8 sliders +
+   numeric values, reset / beat / refresh, plus preset/torture buttons
+   (Neutral, Left, Right, Up, Down, Blink closed, Mouth open, Smile, Frown,
+   Squash, Stretch, Bounce max) that go through the same bounded API.
+3. **Runtime inspector** — model load/error state, current semantic state,
+   mapped Cubism parameters (read-only table), beat/event counter and an
+   event log. Raw Cubism parameter ids never enter the mutation API.
+
+The renderer never fakes a model: without a manifest/SDK it shows the
+placeholder and explains why. Real deformation/outline quality is a human
+gate (see `docs/OUTLINE-RULES.md`), not a repository assertion.
 
 ## Run / test / smoke
 
@@ -144,6 +212,17 @@ npm run smoke:browser
 # expect: BROWSER SMOKE PASS, console errors: 0
 ```
 
+The smoke covers both dashboard modes without licensed assets:
+scenario 1 (placeholder dashboard: viewport renderer, presets, control
+round-trip, console errors 0) and scenario 2 (fixture model3/moc3 plus an
+official-surface test double: `CubismModelSettingJson`/`CubismUserModel`/
+`CubismRenderer_WebGL`/`CubismShaderManager_WebGL`, complete shader asset
+contract, asynchronous readiness, premultiplied-alpha setter, binary loader
+boundaries, ID-handle mapping, read-only mapped table). Scenario 2 writes
+gitignored fixture SDK/shader files under `public/vendor/live2d/` and removes
+them afterwards; it is not a substitute for licensed SDK/model host
+validation.
+
 Docker service (host with Docker):
 
 ```bash
@@ -162,11 +241,16 @@ configured port directly (useful when running `npm start` locally).
 
 - default bind is loopback-only (`AVATAR_HOST_BIND=127.0.0.1`); external
   exposure is explicit opt-in (`AVATAR_HOST_BIND=0.0.0.0`)
-- static serving resolves inside `public/` (path traversal rejected)
+- static serving resolves inside `public/` (path traversal rejected);
+  model assets resolve inside the configured model directory only
 - container runs as non-root (`USER node`), read-only rootfs,
-  `no-new-privileges`, no host sockets/volumes
-- the API has no arbitrary command/path/Docker escape hatches
-- no secrets, no third-party assets vendored (placeholder only)
+  `no-new-privileges`, no host sockets/volumes (licensed models are a
+  read-only volume mount of the operator's own directory)
+- the API has no arbitrary command/path/Docker escape hatches; raw Cubism
+  parameter ids are read-only (`/api/state.mapped`, `/api/model`,
+  dashboard inspector), never accepted by a mutation endpoint
+- no secrets, no third-party assets vendored (placeholder only; licensed
+  SDK/model files are operator-installed under gitignored paths)
 
 See `docs/SECURITY.md` for the full policy.
 
